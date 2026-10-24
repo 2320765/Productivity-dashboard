@@ -51,6 +51,7 @@ import {
 } from "./supabase.js";
 import Workspaces from "./Workspaces.jsx";
 import Friends from "./Friends.jsx";
+import { getErrorMessage } from "./errorMessage.js";
 import { readUserDashboard } from "./userDashboardStorage.js";
 import "./App.css";
 
@@ -64,10 +65,6 @@ const PERIOD_LABELS = { year: "Год", month: "Месяц", week: "Неделя
 const CATEGORY_OPTIONS = ["Работа", "Личное", "Учёба", "Здоровье"];
 const PRIORITY_ORDER = { Высокий: 0, Средний: 1, Низкий: 2 };
 const EMPTY_DASHBOARD = { goals: [], tasks: [] };
-
-function getErrorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function hasDashboardData(dashboard) {
   return dashboard.goals.length > 0 || dashboard.tasks.length > 0;
@@ -700,7 +697,7 @@ function App() {
       }, refreshInvitations)
       .subscribe((status, subscriptionError) => {
         if (active && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
-          setWorkspaceOverviewError(`Подписка на приглашения недоступна: ${subscriptionError?.message ?? status}`);
+          setWorkspaceOverviewError(`Подписка на приглашения недоступна: ${subscriptionError ? getErrorMessage(subscriptionError) : status}`);
         }
       });
 
@@ -804,7 +801,7 @@ function App() {
       })
       .subscribe((status, error) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setSyncError(`Подписка на синхронизацию недоступна: ${error?.message ?? status}`);
+          setSyncError(`Подписка на синхронизацию недоступна: ${error ? getErrorMessage(error) : status}`);
         }
       });
 

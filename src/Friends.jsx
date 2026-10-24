@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Search, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { loadFriends, lookupFriend, removeFriend, respondFriendRequest, sendFriendRequest } from "./supabase.js";
-
-function errorMessage(error) { return error instanceof Error ? error.message : String(error); }
+import { getErrorMessage } from "./errorMessage.js";
 
 function Person({ person }) {
   return <span className="friend-avatar">{person.avatarUrl ? <img src={person.avatarUrl} alt="" /> : person.name.slice(0, 1).toLocaleUpperCase("ru")}</span>;
@@ -23,7 +22,7 @@ export default function Friends({ userId }) {
   useEffect(() => {
     let active = true;
     loadFriends().then((items) => { if (active) { setFriends(items); setError(""); } })
-      .catch((loadError) => { if (active) setError(errorMessage(loadError)); })
+      .catch((loadError) => { if (active) setError(getErrorMessage(loadError)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [userId]);
@@ -31,7 +30,7 @@ export default function Friends({ userId }) {
   async function refresh() {
     setLoading(true);
     try { setFriends(await loadFriends()); setError(""); }
-    catch (loadError) { setError(errorMessage(loadError)); }
+    catch (loadError) { setError(getErrorMessage(loadError)); }
     finally { setLoading(false); }
   }
 
@@ -46,14 +45,14 @@ export default function Friends({ userId }) {
       setMatches(result.filter((person) => !linkedIds.has(person.userId)));
       if (!result.length) setNotice("Пользователь с таким точным именем или email не найден.");
       else if (result.every((person) => linkedIds.has(person.userId))) setNotice("Запрос или дружба с этим пользователем уже есть.");
-    } catch (searchError) { setError(errorMessage(searchError)); }
+    } catch (searchError) { setError(getErrorMessage(searchError)); }
     finally { setBusy(""); }
   }
 
   async function act(key, action, message) {
     setBusy(key); setError(""); setNotice("");
     try { await action(); await refresh(); setNotice(message); setMatches([]); }
-    catch (actionError) { setError(errorMessage(actionError)); }
+    catch (actionError) { setError(getErrorMessage(actionError)); }
     finally { setBusy(""); }
   }
 

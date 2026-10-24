@@ -61,24 +61,21 @@ import {
 } from "./supabase.js";
 import { filterWorkspaceArchive } from "./workspaceArchive.js";
 import { buildWorkspaceProgress } from "./workspaceProgress.js";
+import { getErrorMessage } from "./errorMessage.js";
 
 const PERIODS = [
-  { id: "year", label: "Р“РѕРґ" },
-  { id: "month", label: "РњРµСЃСЏС†" },
-  { id: "week", label: "РќРµРґРµР»СЏ" },
-  { id: "day", label: "Р”РµРЅСЊ" },
+  { id: "year", label: "Год" },
+  { id: "month", label: "Месяц" },
+  { id: "week", label: "Неделя" },
+  { id: "day", label: "День" },
 ];
 const PERIOD_NAMES = Object.fromEntries(PERIODS.map(({ id, label }) => [id, label]));
 const STATUS_NAMES = {
-  pending: "РћР¶РёРґР°РµС‚ РѕС‚РІРµС‚Р°",
-  accepted: "РџСЂРёРЅСЏС‚Рѕ",
-  declined: "РћС‚РєР»РѕРЅРµРЅРѕ",
-  cancelled: "РћС‚РјРµРЅРµРЅРѕ",
+  pending: "Ожидает ответа",
+  accepted: "Принято",
+  declined: "Отклонено",
+  cancelled: "Отменено",
 };
-
-function errorText(error) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function RecordHistory({ workspaceId, recordId, recordType, members, archived, canManage, onArchive }) {
   const [open, setOpen] = useState(false);
@@ -88,20 +85,20 @@ function RecordHistory({ workspaceId, recordId, recordType, members, archived, c
     if (open) { setOpen(false); return; }
     setOpen(true);
     try { setItems(await loadWorkspaceRecordHistory(workspaceId, recordType, recordId)); setError(""); }
-    catch (loadError) { setError(errorText(loadError)); }
+    catch (loadError) { setError(getErrorMessage(loadError)); }
   }
   function description(item) {
-    if (item.action === "created") return "РЎРѕР·РґР°РЅРѕ";
-    if (item.action === "deleted") return "РЈРґР°Р»РµРЅРѕ";
+    if (item.action === "created") return "Создано";
+    if (item.action === "deleted") return "Удалено";
     if (item.changes.archived) return item.changes.archived.to ? "Добавлено в архив" : "Восстановлено из архива";
-    const labels = { title: "РЅР°Р·РІР°РЅРёРµ", deadline: "СЃСЂРѕРє", start_date: "РґР°С‚Р° РЅР°С‡Р°Р»Р°", priority: "РїСЂРёРѕСЂРёС‚РµС‚", status: "СЃС‚Р°С‚СѓСЃ", assignee: "РѕС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№" };
+    const labels = { title: "название", deadline: "срок", start_date: "дата начала", priority: "приоритет", status: "статус", assignee: "ответственный" };
     return Object.keys(item.changes).map((key) => {
       const change = item.changes[key];
-      const value = (raw) => key === "assignee" ? (members.find((member) => member.userId === raw)?.name ?? (raw ? "РЈС‡Р°СЃС‚РЅРёРє" : "РќРµ РЅР°Р·РЅР°С‡РµРЅ")) : raw ?? "вЂ”";
-      return `${labels[key] ?? key}: ${value(change.from)} в†’ ${value(change.to)}`;
-    }).join(" В· ");
+      const value = (raw) => key === "assignee" ? (members.find((member) => member.userId === raw)?.name ?? (raw ? "Участник" : "Не назначен")) : raw ?? "—";
+      return `${labels[key] ?? key}: ${value(change.from)} → ${value(change.to)}`;
+    }).join(" · ");
   }
-  return <div className="record-history"><button className="button button-quiet history-toggle" type="button" onClick={toggle}><History size={14} />{open ? "РЎРєСЂС‹С‚СЊ РёСЃС‚РѕСЂРёСЋ" : "РСЃС‚РѕСЂРёСЏ"}</button>{canManage && <button className="icon-button" type="button" title={archived ? "Восстановить запись" : "В архив"} aria-label={archived ? "Восстановить запись" : "В архив"} onClick={onArchive}><Archive size={14} /></button>}{open && <div className="record-history-list">{error ? <small className="history-error">{error}</small> : items.length ? items.map((item) => <div className="record-history-item" key={item.id}><span>{description(item)}</span><small>{item.actorName} В· {new Date(item.occurredAt).toLocaleString("ru-RU")}</small></div>) : <small>РСЃС‚РѕСЂРёСЏ РїРѕРєР° РїСѓСЃС‚Р°.</small>}</div>}</div>;
+  return <div className="record-history"><button className="button button-quiet history-toggle" type="button" onClick={toggle}><History size={14} />{open ? "Скрыть историю" : "История"}</button>{canManage && <button className="icon-button" type="button" title={archived ? "Восстановить запись" : "В архив"} aria-label={archived ? "Восстановить запись" : "В архив"} onClick={onArchive}><Archive size={14} /></button>}{open && <div className="record-history-list">{error ? <small className="history-error">{error}</small> : items.length ? items.map((item) => <div className="record-history-item" key={item.id}><span>{description(item)}</span><small>{item.actorName} · {new Date(item.occurredAt).toLocaleString("ru-RU")}</small></div>) : <small>История пока пуста.</small>}</div>}</div>;
 }
 
 function emptyRecords() {
@@ -218,7 +215,7 @@ function WorkspaceEditor({ userId, workspaceId, records, onSave, onCancel, kind,
       startDate: initialGoal?.startDate ?? range.start,
       endDate: initialGoal?.endDate ?? range.end,
       parentId: initialGoal?.parentId ?? "",
-      priority: initialGoal?.priority ?? "РЎСЂРµРґРЅРёР№",
+      priority: initialGoal?.priority ?? "Средний",
       notes: initialGoal?.notes ?? "",
       archivedAt: initialGoal?.archivedAt ?? null,
     };
@@ -228,12 +225,12 @@ function WorkspaceEditor({ userId, workspaceId, records, onSave, onCancel, kind,
     createdBy: initialTask?.createdBy ?? userId,
     assigneeId: initialTask?.assigneeId ?? "",
     title: initialTask?.title ?? "",
-    category: initialTask?.category ?? "Р Р°Р±РѕС‚Р°",
+    category: initialTask?.category ?? "Работа",
     date: initialTask?.date ?? initialDate,
     time: initialTask?.time ?? "",
     deadline: initialTask?.deadline ?? "",
-    priority: initialTask?.priority ?? "РЎСЂРµРґРЅРёР№",
-    status: initialTask?.status ?? "Рљ РІС‹РїРѕР»РЅРµРЅРёСЋ",
+    priority: initialTask?.priority ?? "Средний",
+    status: initialTask?.status ?? "К выполнению",
     notes: initialTask?.notes ?? "",
     goalId: initialTask?.goalId ?? "",
     archivedAt: initialTask?.archivedAt ?? null,
@@ -265,7 +262,7 @@ function WorkspaceEditor({ userId, workspaceId, records, onSave, onCancel, kind,
       });
       await onSave();
     } catch (saveError) {
-      setError(errorText(saveError));
+      setError(getErrorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -284,7 +281,7 @@ function WorkspaceEditor({ userId, workspaceId, records, onSave, onCancel, kind,
       });
       await onSave();
     } catch (saveError) {
-      setError(errorText(saveError));
+      setError(getErrorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -293,40 +290,40 @@ function WorkspaceEditor({ userId, workspaceId, records, onSave, onCancel, kind,
   return (
     <section className="panel workspace-editor">
       <div className="section-heading">
-        <div><span className="section-kicker">РћР±С‰РёРµ Р·Р°РїРёСЃРё</span><h2>{editingGoal ? "РР·РјРµРЅРёС‚СЊ С†РµР»СЊ" : editingTask ? "РР·РјРµРЅРёС‚СЊ Р·Р°РґР°С‡Сѓ" : "РќРѕРІР°СЏ Р·Р°РїРёСЃСЊ"}</h2></div>
-        <button className="icon-button" type="button" onClick={onCancel} aria-label="Р—Р°РєСЂС‹С‚СЊ"><X size={17} /></button>
+        <div><span className="section-kicker">Общие записи</span><h2>{editingGoal ? "Изменить цель" : editingTask ? "Изменить задачу" : "Новая запись"}</h2></div>
+        <button className="icon-button" type="button" onClick={onCancel} aria-label="Закрыть"><X size={17} /></button>
       </div>
       {editingGoal && (
         <form className="dialog-form workspace-form" onSubmit={submitGoal}>
-          <label className="field field-wide"><span>РќР°Р·РІР°РЅРёРµ РѕР±С‰РµР№ С†РµР»Рё</span><input autoFocus required maxLength="200" value={goalForm.title} onChange={(event) => setGoalForm({ ...goalForm, title: event.target.value })} /></label>
-          <label className="field"><span>РџРµСЂРёРѕРґ</span><select value={goalForm.period} onChange={(event) => {
+          <label className="field field-wide"><span>Название общей цели</span><input autoFocus required maxLength="200" value={goalForm.title} onChange={(event) => setGoalForm({ ...goalForm, title: event.target.value })} /></label>
+          <label className="field"><span>Период</span><select value={goalForm.period} onChange={(event) => {
             const period = event.target.value;
             const range = getGoalDefaultRange(initialDate, period);
             setGoalForm({ ...goalForm, period, ...range, parentId: "" });
           }}>{PERIODS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
-          <label className="field"><span>РџСЂРёРѕСЂРёС‚РµС‚</span><select value={goalForm.priority} onChange={(event) => setGoalForm({ ...goalForm, priority: event.target.value })}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="field"><span>РќР°С‡Р°Р»Рѕ</span><input required type="date" value={goalForm.startDate} onChange={(event) => setGoalForm({ ...goalForm, startDate: event.target.value, parentId: "" })} /></label>
-          <label className="field"><span>РљРѕРЅРµС†</span><input required type="date" min={goalForm.startDate} value={goalForm.endDate} onChange={(event) => setGoalForm({ ...goalForm, endDate: event.target.value, parentId: "" })} /></label>
-          {goalPeriod && <label className="field field-wide"><span>РЎРІСЏР·Р°С‚СЊ СЃ С†РµР»СЊСЋ РЅР° СѓСЂРѕРІРµРЅСЊ РІС‹С€Рµ</span><select value={goalForm.parentId} onChange={(event) => setGoalForm({ ...goalForm, parentId: event.target.value })}><option value="">Р‘РµР· СЃРІСЏР·Рё</option>{parentGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>}
-          <label className="field field-wide"><span>Р—Р°РјРµС‚РєРё</span><textarea rows="3" value={goalForm.notes} onChange={(event) => setGoalForm({ ...goalForm, notes: event.target.value })} /></label>
+          <label className="field"><span>Приоритет</span><select value={goalForm.priority} onChange={(event) => setGoalForm({ ...goalForm, priority: event.target.value })}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="field"><span>Начало</span><input required type="date" value={goalForm.startDate} onChange={(event) => setGoalForm({ ...goalForm, startDate: event.target.value, parentId: "" })} /></label>
+          <label className="field"><span>Конец</span><input required type="date" min={goalForm.startDate} value={goalForm.endDate} onChange={(event) => setGoalForm({ ...goalForm, endDate: event.target.value, parentId: "" })} /></label>
+          {goalPeriod && <label className="field field-wide"><span>Связать с целью на уровень выше</span><select value={goalForm.parentId} onChange={(event) => setGoalForm({ ...goalForm, parentId: event.target.value })}><option value="">Без связи</option>{parentGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>}
+          <label className="field field-wide"><span>Заметки</span><textarea rows="3" value={goalForm.notes} onChange={(event) => setGoalForm({ ...goalForm, notes: event.target.value })} /></label>
           {error && <p className="sync-alert field-wide" role="alert">{error}</p>}
-          <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={onCancel}>РћС‚РјРµРЅР°</button><button className="button button-primary" type="submit" disabled={saving}><Check size={16} />{saving ? "РЎРѕС…СЂР°РЅСЏРµРјвЂ¦" : "РЎРѕС…СЂР°РЅРёС‚СЊ С†РµР»СЊ"}</button></div>
+          <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={onCancel}>Отмена</button><button className="button button-primary" type="submit" disabled={saving}><Check size={16} />{saving ? "Сохраняем…" : "Сохранить цель"}</button></div>
         </form>
       )}
       {editingTask && (
         <form className="dialog-form workspace-form" onSubmit={submitTask}>
-          <label className="field field-wide"><span>РќР°Р·РІР°РЅРёРµ РѕР±С‰РµР№ Р·Р°РґР°С‡Рё</span><input autoFocus={!editingGoal} required maxLength="200" value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} /></label>
-          <label className="field"><span>РљР°С‚РµРіРѕСЂРёСЏ</span><input required value={taskForm.category} onChange={(event) => setTaskForm({ ...taskForm, category: event.target.value })} /></label>
-          <label className="field"><span>РћС‚РІРµС‚СЃС‚РІРµРЅРЅС‹Р№</span><select value={taskForm.assigneeId} onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}><option value="">РќРµ РЅР°Р·РЅР°С‡РµРЅ</option>{records.members.map((member) => <option key={member.userId} value={member.userId}>{member.name}</option>)}</select></label>
-          <label className="field"><span>Р”Р°С‚Р°</span><input required type="date" value={taskForm.date} onChange={(event) => setTaskForm({ ...taskForm, date: event.target.value, goalId: "" })} /></label>
-          <label className="field"><span>Р’СЂРµРјСЏ</span><input type="time" value={taskForm.time} onChange={(event) => setTaskForm({ ...taskForm, time: event.target.value })} /></label>
-          <label className="field"><span>РЎСЂРѕРє РІС‹РїРѕР»РЅРµРЅРёСЏ</span><input type="datetime-local" value={taskForm.deadline} onChange={(event) => setTaskForm({ ...taskForm, deadline: event.target.value })} /></label>
-          <label className="field"><span>РџСЂРёРѕСЂРёС‚РµС‚</span><select value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value })}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="field"><span>РЎС‚Р°С‚СѓСЃ</span><select value={taskForm.status} onChange={(event) => setTaskForm({ ...taskForm, status: event.target.value })}>{STATUSES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="field field-wide"><span>РЎРІСЏР·Р°С‚СЊ СЃ РѕР±С‰РµР№ С†РµР»СЊСЋ</span><select value={taskForm.goalId} onChange={(event) => setTaskForm({ ...taskForm, goalId: event.target.value })}><option value="">Р‘РµР· СЃРІСЏР·Рё</option>{availableGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>
-          <label className="field field-wide"><span>Р—Р°РјРµС‚РєРё</span><textarea rows="3" value={taskForm.notes} onChange={(event) => setTaskForm({ ...taskForm, notes: event.target.value })} /></label>
+          <label className="field field-wide"><span>Название общей задачи</span><input autoFocus={!editingGoal} required maxLength="200" value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} /></label>
+          <label className="field"><span>Категория</span><input required value={taskForm.category} onChange={(event) => setTaskForm({ ...taskForm, category: event.target.value })} /></label>
+          <label className="field"><span>Ответственный</span><select value={taskForm.assigneeId} onChange={(event) => setTaskForm({ ...taskForm, assigneeId: event.target.value })}><option value="">Не назначен</option>{records.members.map((member) => <option key={member.userId} value={member.userId}>{member.name}</option>)}</select></label>
+          <label className="field"><span>Дата</span><input required type="date" value={taskForm.date} onChange={(event) => setTaskForm({ ...taskForm, date: event.target.value, goalId: "" })} /></label>
+          <label className="field"><span>Время</span><input type="time" value={taskForm.time} onChange={(event) => setTaskForm({ ...taskForm, time: event.target.value })} /></label>
+          <label className="field"><span>Срок выполнения</span><input type="datetime-local" value={taskForm.deadline} onChange={(event) => setTaskForm({ ...taskForm, deadline: event.target.value })} /></label>
+          <label className="field"><span>Приоритет</span><select value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value })}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="field"><span>Статус</span><select value={taskForm.status} onChange={(event) => setTaskForm({ ...taskForm, status: event.target.value })}>{STATUSES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="field field-wide"><span>Связать с общей целью</span><select value={taskForm.goalId} onChange={(event) => setTaskForm({ ...taskForm, goalId: event.target.value })}><option value="">Без связи</option>{availableGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>
+          <label className="field field-wide"><span>Заметки</span><textarea rows="3" value={taskForm.notes} onChange={(event) => setTaskForm({ ...taskForm, notes: event.target.value })} /></label>
           {error && <p className="sync-alert field-wide" role="alert">{error}</p>}
-          <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={onCancel}>РћС‚РјРµРЅР°</button><button className="button button-primary" type="submit" disabled={saving}><Check size={16} />{saving ? "РЎРѕС…СЂР°РЅСЏРµРјвЂ¦" : "РЎРѕС…СЂР°РЅРёС‚СЊ Р·Р°РґР°С‡Сѓ"}</button></div>
+          <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={onCancel}>Отмена</button><button className="button button-primary" type="submit" disabled={saving}><Check size={16} />{saving ? "Сохраняем…" : "Сохранить задачу"}</button></div>
         </form>
       )}
     </section>
@@ -400,7 +397,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
         if (active) setRecords(data);
       })
       .catch((loadError) => {
-        if (active) setError(`РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ: ${errorText(loadError)}`);
+        if (active) setError(`Не удалось загрузить пространство: ${getErrorMessage(loadError)}`);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -414,7 +411,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
     if (!["owner", "admin"].includes(selectedWorkspaceRole)) { return; }
     let active = true;
     loadFriends().then((items) => { if (active) setFriends(items.filter((friend) => friend.status === "accepted")); })
-      .catch((loadError) => { if (active) setError(`РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РґСЂСѓР·РµР№: ${errorText(loadError)}`); });
+      .catch((loadError) => { if (active) setError(`Не удалось загрузить друзей: ${getErrorMessage(loadError)}`); });
     return () => { active = false; };
   }, [selectedWorkspaceRole]);
 
@@ -436,7 +433,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
           setError("");
         }
       } catch (refreshError) {
-        if (active) setError(`РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ РѕР±РЅРѕРІР»РµРЅРёРµ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІР°: ${errorText(refreshError)}`);
+        if (active) setError(`Не удалось получить обновление пространства: ${getErrorMessage(refreshError)}`);
       }
     }
 
@@ -480,7 +477,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
       }, refreshSharedData)
       .subscribe((status, subscriptionError) => {
         if (active && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
-          setError(`РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРїРёСЃР°С‚СЊСЃСЏ РЅР° РѕР±РЅРѕРІР»РµРЅРёСЏ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІР°: ${subscriptionError?.message ?? status}`);
+          setError(`Не удалось подписаться на обновления пространства: ${subscriptionError ? getErrorMessage(subscriptionError) : status}`);
         }
       });
 
@@ -505,7 +502,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
       const data = await loadWorkspaceRecords(selectedId);
       setRecords(data);
     } catch (loadError) {
-      setError(`РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ: ${errorText(loadError)}`);
+      setError(`Не удалось обновить пространство: ${getErrorMessage(loadError)}`);
     } finally {
       setLoading(false);
     }
@@ -520,7 +517,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
       if (refresh) await refreshSelected();
       return true;
     } catch (actionError) {
-      setError(errorText(actionError));
+      setError(getErrorMessage(actionError));
       return false;
     } finally {
       setBusy("");
@@ -541,7 +538,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
       setLoading(true);
       setSelectedId(newId);
     } catch (actionError) {
-      setError(errorText(actionError));
+      setError(getErrorMessage(actionError));
     } finally {
       setBusy("");
     }
@@ -555,12 +552,12 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
       await sendWorkspaceInvitation(selectedId, email);
       setInviteEmail("");
     });
-    if (sent) setNotice("Р•СЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ СЌС‚РёРј Р°РґСЂРµСЃРѕРј Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ, РїСЂРёРіР»Р°С€РµРЅРёРµ РїРѕСЏРІРёС‚СЃСЏ Сѓ РЅРµРіРѕ РІ СЂР°Р·РґРµР»Рµ В«РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР°В». Email-СѓРІРµРґРѕРјР»РµРЅРёРµ РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ.");
+    if (sent) setNotice("Если пользователь с этим адресом зарегистрирован, приглашение появится у него в разделе «Пространства». Email-уведомление не отправляется.");
   }
 
   async function inviteFriend(friend) {
     const sent = await runAction(`invite-friend-${friend.userId}`, () => sendWorkspaceInvitationToUser(selectedId, friend.userId));
-    if (sent) setNotice(`РџСЂРёРіР»Р°С€РµРЅРёРµ РґР»СЏ ${friend.name} РѕС‚РїСЂР°РІР»РµРЅРѕ.`);
+    if (sent) setNotice(`Приглашение для ${friend.name} отправлено.`);
   }
 
   async function submitWorkspaceRename(event) {
@@ -593,12 +590,12 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
   }
 
   async function deleteGoal(goal) {
-    if (!window.confirm(`РЈРґР°Р»РёС‚СЊ РѕР±С‰СѓСЋ С†РµР»СЊ В«${goal.title}В»? РЎРІСЏР·Р°РЅРЅС‹Рµ РїРѕРґС†РµР»Рё Рё Р·Р°РґР°С‡Рё СЃРѕС…СЂР°РЅСЏС‚СЃСЏ Р±РµР· СЃРІСЏР·Рё.`)) return;
+    if (!window.confirm(`Удалить общую цель «${goal.title}»? Связанные подцели и задачи сохранятся без связи.`)) return;
     await runAction(`goal-${goal.id}`, () => deleteWorkspaceGoal(selectedId, goal.id));
   }
 
   async function deleteTask(task) {
-    if (!window.confirm(`РЈРґР°Р»РёС‚СЊ РѕР±С‰СѓСЋ Р·Р°РґР°С‡Сѓ В«${task.title}В»?`)) return;
+    if (!window.confirm(`Удалить общую задачу «${task.title}»?`)) return;
     await runAction(`task-${task.id}`, () => deleteWorkspaceTask(selectedId, task.id));
   }
 
@@ -612,7 +609,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
   async function toggleTask(task) {
     await runAction(`task-${task.id}`, () => saveWorkspaceTask(userId, selectedId, {
       ...task,
-      status: task.status === "Р’С‹РїРѕР»РЅРµРЅРѕ" ? "Рљ РІС‹РїРѕР»РЅРµРЅРёСЋ" : "Р’С‹РїРѕР»РЅРµРЅРѕ",
+      status: task.status === "Выполнено" ? "К выполнению" : "Выполнено",
     }));
   }
 
@@ -656,14 +653,14 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
 
       <section className="panel workspace-overview">
         <div className="section-heading">
-          <div><span className="section-kicker">РџР»Р°РЅРёСЂСѓР№С‚Рµ РІРјРµСЃС‚Рµ</span><h2>РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР°</h2></div>
-          <button className="button button-primary" type="button" onClick={() => setWorkspaceFormOpen((open) => !open)}><FolderPlus size={16} /> РЎРѕР·РґР°С‚СЊ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ</button>
+          <div><span className="section-kicker">Планируйте вместе</span><h2>Пространства</h2></div>
+          <button className="button button-primary" type="button" onClick={() => setWorkspaceFormOpen((open) => !open)}><FolderPlus size={16} /> Создать пространство</button>
         </div>
         {workspaceFormOpen && (
           <form className="dialog-form workspace-create-form" onSubmit={submitWorkspace}>
-            <label className="field"><span>РќР°Р·РІР°РЅРёРµ</span><input required maxLength="80" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="РќР°РїСЂРёРјРµСЂ, РљРѕРјР°РЅРґР° РїСЂРѕРµРєС‚Р°" /></label>
-            <label className="field"><span>РћРїРёСЃР°РЅРёРµ</span><input maxLength="500" value={workspaceDescription} onChange={(event) => setWorkspaceDescription(event.target.value)} placeholder="РќР°Рґ С‡РµРј СЂР°Р±РѕС‚Р°РµС‚ РєРѕРјР°РЅРґР°" /></label>
-            <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={() => setWorkspaceFormOpen(false)}>РћС‚РјРµРЅР°</button><button className="button button-primary" type="submit" disabled={busy === "workspace"}>{busy === "workspace" ? "РЎРѕР·РґР°С‘РјвЂ¦" : "РЎРѕР·РґР°С‚СЊ"}</button></div>
+            <label className="field"><span>Название</span><input required maxLength="80" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="Например, Команда проекта" /></label>
+            <label className="field"><span>Описание</span><input maxLength="500" value={workspaceDescription} onChange={(event) => setWorkspaceDescription(event.target.value)} placeholder="Над чем работает команда" /></label>
+            <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={() => setWorkspaceFormOpen(false)}>Отмена</button><button className="button button-primary" type="submit" disabled={busy === "workspace"}>{busy === "workspace" ? "Создаём…" : "Создать"}</button></div>
           </form>
         )}
         {overview.workspaces.length ? (
@@ -678,20 +675,20 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
                 setSelectedId(workspace.id);
               }}>
                 <span className="workspace-card-icon"><Users size={17} /></span>
-                <span><strong>{workspace.name}</strong><small>{workspace.role === "owner" ? "Владелец" : workspace.role === "admin" ? "Администратор" : "Участник"} В· {workspace.description || "РЎРѕРІРјРµСЃС‚РЅС‹Рµ С†РµР»Рё Рё Р·Р°РґР°С‡Рё"}</small></span>
+                <span><strong>{workspace.name}</strong><small>{workspace.role === "owner" ? "Владелец" : workspace.role === "admin" ? "Администратор" : "Участник"} · {workspace.description || "Совместные цели и задачи"}</small></span>
               </button>
             ))}
           </div>
         ) : overviewLoading ? (
-          <p className="workspace-hint">Р—Р°РіСЂСѓР¶Р°РµРј РІР°С€Рё РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІР°вЂ¦</p>
+          <p className="workspace-hint">Загружаем ваши пространства…</p>
         ) : !overviewError && (
-          <div className="workspace-empty"><span className="empty-icon"><Users size={20} /></span><strong>РџРѕРєР° РЅРµС‚ СЂР°Р±РѕС‡РёС… РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІ</strong><span>РЎРѕР·РґР°Р№С‚Рµ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ Рё РїСЂРёРіР»Р°СЃРёС‚Рµ СѓС‡Р°СЃС‚РЅРёРєРѕРІ, С‡С‚РѕР±С‹ РїР»Р°РЅРёСЂРѕРІР°С‚СЊ РІРјРµСЃС‚Рµ.</span></div>
+          <div className="workspace-empty"><span className="empty-icon"><Users size={20} /></span><strong>Пока нет рабочих пространств</strong><span>Создайте пространство и пригласите участников, чтобы планировать вместе.</span></div>
         )}
       </section>
 
       <section className="panel invitation-panel">
         <div className="section-heading">
-          <div><span className="section-kicker">РџСЂРёРіР»Р°С€РµРЅРёСЏ РѕС‚РґРµР»СЊРЅРѕ РѕС‚ Р»РёС‡РЅС‹С… РїР»Р°РЅРѕРІ</span><h2>РџСЂРёРіР»Р°С€РµРЅРёСЏ</h2></div>
+          <div><span className="section-kicker">Приглашения отдельно от личных планов</span><h2>Приглашения</h2></div>
         </div>
         {overview.invitations.length ? (
           <div className="invitation-list">
@@ -702,45 +699,45 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
               return (
                 <article className="invitation-row" key={invitation.id}>
                   <span className="workspace-card-icon"><Mail size={16} /></span>
-                  <div className="invitation-copy"><strong>{invitation.workspaceName}</strong><small>{received ? "РџСЂРёРіР»Р°С€РµРЅРёРµ РґР»СЏ РІР°СЃ" : `РџСЂРёРіР»Р°С€С‘РЅ: ${invitation.inviteeName ?? "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ"}`}</small></div>
+                  <div className="invitation-copy"><strong>{invitation.workspaceName}</strong><small>{received ? "Приглашение для вас" : `Приглашён: ${invitation.inviteeName ?? "Пользователь"}`}</small></div>
                   <span className={`invitation-status status-${invitation.status}`}>{STATUS_NAMES[invitation.status]}</span>
-                  {received && invitation.status === "pending" && <div className="invitation-actions"><button className="button button-primary" type="button" disabled={Boolean(busy)} onClick={() => answerInvitation(invitation, true)}>РџСЂРёРЅСЏС‚СЊ</button><button className="button button-quiet" type="button" disabled={Boolean(busy)} onClick={() => answerInvitation(invitation, false)}>РћС‚РєР»РѕРЅРёС‚СЊ</button></div>}
+                  {received && invitation.status === "pending" && <div className="invitation-actions"><button className="button button-primary" type="button" disabled={Boolean(busy)} onClick={() => answerInvitation(invitation, true)}>Принять</button><button className="button button-quiet" type="button" disabled={Boolean(busy)} onClick={() => answerInvitation(invitation, false)}>Отклонить</button></div>}
                   {outgoingPending && <button className="button button-quiet" type="button" disabled={Boolean(busy)} onClick={async () => {
                     const completed = await runAction(`invite-${invitation.id}`, () => cancelWorkspaceInvitation(invitation.id), false);
                     if (completed) await onRefreshOverview();
-                  }}>РћС‚РјРµРЅРёС‚СЊ</button>}
+                  }}>Отменить</button>}
                 </article>
               );
             })}
           </div>
-        ) : <p className="workspace-hint">Р’С…РѕРґСЏС‰РёРµ Рё РѕС‚РїСЂР°РІР»РµРЅРЅС‹Рµ РїСЂРёРіР»Р°С€РµРЅРёСЏ РїРѕСЏРІСЏС‚СЃСЏ Р·РґРµСЃСЊ.</p>}
+        ) : <p className="workspace-hint">Входящие и отправленные приглашения появятся здесь.</p>}
       </section>
 
       {selectedWorkspace && (
         <section className="panel workspace-detail">
           <div className="section-heading">
-            <div><span className="section-kicker">{selectedWorkspace.role === "owner" ? "Владелец" : selectedWorkspace.role === "admin" ? "Администратор" : "Участник"} В· {records.members.length} СѓС‡Р°СЃС‚РЅРёРєРѕРІ</span><h2>{selectedWorkspace.name}</h2>{selectedWorkspace.description && <p className="workspace-description">{selectedWorkspace.description}</p>}</div>
+            <div><span className="section-kicker">{selectedWorkspace.role === "owner" ? "Владелец" : selectedWorkspace.role === "admin" ? "Администратор" : "Участник"} · {records.members.length} участников</span><h2>{selectedWorkspace.name}</h2>{selectedWorkspace.description && <p className="workspace-description">{selectedWorkspace.description}</p>}</div>
             <div className="workspace-heading-actions">
-            <button className="button button-quiet" type="button" onClick={reloadSelected} disabled={loading}><RefreshCw size={15} /> РћР±РЅРѕРІРёС‚СЊ</button>
+            <button className="button button-quiet" type="button" onClick={reloadSelected} disabled={loading}><RefreshCw size={15} /> Обновить</button>
             {selectedWorkspace.role === "owner"
               ? <button className="button button-quiet danger-hover" type="button" disabled={Boolean(busy)} onClick={async () => {
-                if (window.confirm(`РЈРґР°Р»РёС‚СЊ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ В«${selectedWorkspace.name}В» Рё РІСЃРµ РµРіРѕ РѕР±С‰РёРµ Р·Р°РїРёСЃРё? Р­С‚Рѕ РЅРµР»СЊР·СЏ РѕС‚РјРµРЅРёС‚СЊ.`)) {
+                if (window.confirm(`Удалить пространство «${selectedWorkspace.name}» и все его общие записи? Это нельзя отменить.`)) {
                   const deleted = await runAction("delete-workspace", () => deleteWorkspace(selectedId), false);
                   if (!deleted) return;
                   setSelectedId("");
                   setRecords(emptyRecords());
                   await onRefreshOverview();
                 }
-              }}><Trash2 size={15} /> РЈРґР°Р»РёС‚СЊ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ</button>
+              }}><Trash2 size={15} /> Удалить пространство</button>
               : <button className="button button-quiet" type="button" disabled={Boolean(busy)} onClick={async () => {
-                if (window.confirm(`Р’С‹Р№С‚Рё РёР· РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° В«${selectedWorkspace.name}В»?`)) {
+                if (window.confirm(`Выйти из пространства «${selectedWorkspace.name}»?`)) {
                   const left = await runAction("leave-workspace", () => leaveWorkspace(selectedId), false);
                   if (!left) return;
                   setSelectedId("");
                   setRecords(emptyRecords());
                   await onRefreshOverview();
                 }
-              }}>РџРѕРєРёРЅСѓС‚СЊ РїСЂРѕСЃС‚СЂР°РЅСЃС‚РІРѕ</button>}
+              }}>Покинуть пространство</button>}
             </div>
           </div>
           {selectedWorkspace.role === "owner" && <div className="workspace-owner-tools">
@@ -753,19 +750,19 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
           {(["owner", "admin"].includes(selectedWorkspace.role)) && (
             <>
               <div className="workspace-friend-invites">
-                <div className="section-heading"><div><span className="section-kicker">РџСЂРёРіР»Р°СЃРёС‚Рµ РґСЂСѓРіР°</span><h3>Р”СЂСѓР·СЊСЏ</h3></div></div>
+                <div className="section-heading"><div><span className="section-kicker">Пригласите друга</span><h3>Друзья</h3></div></div>
                 {friends.length ? <div className="workspace-friend-list">{friends.map((friend) => {
                   const member = records.members.some((item) => item.userId === friend.userId);
                   const pending = overview.invitations.some((item) => item.workspaceId === selectedId && item.inviteeId === friend.userId && item.status === "pending");
                   const accepted = overview.invitations.some((item) => item.workspaceId === selectedId && item.inviteeId === friend.userId && item.status === "accepted");
-                  const label = member ? "РЈС‡Р°СЃС‚РЅРёРє" : pending ? "РћР¶РёРґР°РµС‚ РѕС‚РІРµС‚Р°" : accepted ? "РџСЂРёРіР»Р°С€РµРЅРёРµ РїСЂРёРЅСЏС‚Рѕ" : "РњРѕР¶РЅРѕ РїСЂРёРіР»Р°СЃРёС‚СЊ";
-                  return <div className="workspace-friend-row" key={friend.userId}><span className="member-avatar">{friend.avatarUrl ? <img src={friend.avatarUrl} alt="" /> : friend.name.slice(0, 1).toLocaleUpperCase("ru")}</span><span className="member-name"><strong>{friend.name}</strong><small>{label}</small></span>{!member && !pending && !accepted && <button className="button button-secondary" type="button" disabled={Boolean(busy)} onClick={() => inviteFriend(friend)}><UserPlus size={14} /> РџСЂРёРіР»Р°СЃРёС‚СЊ</button>}{member && <Check size={16} className="workspace-friend-check" />}</div>;
-                })}</div> : <p className="workspace-hint">Р”РѕР±Р°РІСЊС‚Рµ РґСЂСѓР·РµР№, С‡С‚РѕР±С‹ РїСЂРёРіР»Р°С€Р°С‚СЊ РёС… СЃСЋРґР°. РњРѕР¶РЅРѕ С‚Р°РєР¶Рµ РїСЂРёРіР»Р°СЃРёС‚СЊ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅРЅРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РїРѕ email.</p>}
+                  const label = member ? "Участник" : pending ? "Ожидает ответа" : accepted ? "Приглашение принято" : "Можно пригласить";
+                  return <div className="workspace-friend-row" key={friend.userId}><span className="member-avatar">{friend.avatarUrl ? <img src={friend.avatarUrl} alt="" /> : friend.name.slice(0, 1).toLocaleUpperCase("ru")}</span><span className="member-name"><strong>{friend.name}</strong><small>{label}</small></span>{!member && !pending && !accepted && <button className="button button-secondary" type="button" disabled={Boolean(busy)} onClick={() => inviteFriend(friend)}><UserPlus size={14} /> Пригласить</button>}{member && <Check size={16} className="workspace-friend-check" />}</div>;
+                })}</div> : <p className="workspace-hint">Добавьте друзей, чтобы приглашать их сюда. Можно также пригласить зарегистрированного пользователя по email.</p>}
               </div>
               <form className="workspace-invite-form" onSubmit={submitInvite}>
-                <label className="field"><span>РР»Рё РїСЂРёРіР»Р°СЃРёС‚Рµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅРЅРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РїРѕ email</span><input required type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@example.com" /></label>
-                <button className="button button-secondary" type="submit" disabled={Boolean(busy)}><UserPlus size={16} />{busy === "invite" ? "РћС‚РїСЂР°РІР»СЏРµРјвЂ¦" : "РћС‚РїСЂР°РІРёС‚СЊ РїСЂРёРіР»Р°С€РµРЅРёРµ"}</button>
-                <small>РџРѕРґС…РѕРґРёС‚ Рё РґР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ, РєРѕС‚РѕСЂС‹Р№ РµС‰С‘ РЅРµ РІ РґСЂСѓР·СЊСЏС…. РџСЂРёРіР»Р°С€РµРЅРёРµ РїРѕСЏРІРёС‚СЃСЏ Сѓ РЅРµРіРѕ РІ СЂР°Р·РґРµР»Рµ В«РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР°В» РїРѕСЃР»Рµ РІС…РѕРґР°.</small>
+                <label className="field"><span>Или пригласите зарегистрированного пользователя по email</span><input required type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@example.com" /></label>
+                <button className="button button-secondary" type="submit" disabled={Boolean(busy)}><UserPlus size={16} />{busy === "invite" ? "Отправляем…" : "Отправить приглашение"}</button>
+                <small>Подходит и для пользователя, который ещё не в друзьях. Приглашение появится у него в разделе «Пространства» после входа.</small>
               </form>
             </>
           )}
@@ -773,22 +770,22 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
             {records.members.map((member) => (
               <div className="member-row" key={member.userId}>
                 <span className="member-avatar">{member.name.slice(0, 1).toLocaleUpperCase("ru")}</span>
-                <span className="member-name"><strong>{member.name}</strong><small>{member.role === "owner" ? "Владелец" : member.role === "admin" ? "Администратор" : "Участник"}{member.userId === userId ? " В· Р’С‹" : ""}</small></span>
-                {selectedWorkspace.role === "owner" && member.role !== "owner" && <select className="member-role-select" aria-label={`Роль ${member.name}`} value={member.role} disabled={Boolean(busy)} onChange={(event) => runAction(`role-${member.userId}`, () => setWorkspaceMemberRole(selectedId, member.userId, event.target.value))}><option value="admin">Администратор</option><option value="member">Участник</option></select>}{["owner", "admin"].includes(selectedWorkspace.role) && member.role === "member" && <button className="icon-button danger-hover" type="button" aria-label={`РЈРґР°Р»РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР° ${member.name}`} title="РЈРґР°Р»РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР°" disabled={Boolean(busy)} onClick={() => {
-                  if (window.confirm(`РЈРґР°Р»РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР° В«${member.name}В»?`)) {
+                <span className="member-name"><strong>{member.name}</strong><small>{member.role === "owner" ? "Владелец" : member.role === "admin" ? "Администратор" : "Участник"}{member.userId === userId ? " · Вы" : ""}</small></span>
+                {selectedWorkspace.role === "owner" && member.role !== "owner" && <select className="member-role-select" aria-label={`Роль ${member.name}`} value={member.role} disabled={Boolean(busy)} onChange={(event) => runAction(`role-${member.userId}`, () => setWorkspaceMemberRole(selectedId, member.userId, event.target.value))}><option value="admin">Администратор</option><option value="member">Участник</option></select>}{["owner", "admin"].includes(selectedWorkspace.role) && member.role === "member" && <button className="icon-button danger-hover" type="button" aria-label={`Удалить участника ${member.name}`} title="Удалить участника" disabled={Boolean(busy)} onClick={() => {
+                  if (window.confirm(`Удалить участника «${member.name}»?`)) {
                     runAction(`member-${member.userId}`, () => removeWorkspaceMember(selectedId, member.userId));
                   }
                 }}><UserMinus size={16} /></button>}
               </div>
             ))}
-            {loading && <p className="workspace-hint">Р—Р°РіСЂСѓР¶Р°РµРј СѓС‡Р°СЃС‚РЅРёРєРѕРІ Рё РѕР±С‰РёРµ Р·Р°РїРёСЃРёвЂ¦</p>}
+            {loading && <p className="workspace-hint">Загружаем участников и общие записи…</p>}
           </div>
 
           {!loading && (
             <>
               <div className="workspace-planner">
-                <div className="view-switch" role="tablist" aria-label="Р¤РёР»СЊС‚СЂ РѕР±С‰РµРіРѕ РїР»Р°РЅР°">{PERIODS.map(({ id, label }) => <button key={id} type="button" role="tab" aria-selected={period === id} className={period === id ? "view-tab active" : "view-tab"} onClick={() => setPeriod(id)}>{label}</button>)}</div>
-                <div className="period-controls"><button className="icon-button" type="button" aria-label="РџСЂРµРґС‹РґСѓС‰РёР№ РїРµСЂРёРѕРґ" onClick={() => setSelectedDate(shiftDate(selectedDate, period === "week" ? -7 : -1, period === "week" ? "day" : period))}><ArrowLeft size={16} /></button><h3 className="period-title">{formatPeriod(selectedDate, period)}</h3><button className="icon-button" type="button" aria-label="РЎР»РµРґСѓСЋС‰РёР№ РїРµСЂРёРѕРґ" onClick={() => setSelectedDate(shiftDate(selectedDate, period === "week" ? 7 : 1, period === "week" ? "day" : period))}><ArrowRight size={16} /></button></div>
+                <div className="view-switch" role="tablist" aria-label="Фильтр общего плана">{PERIODS.map(({ id, label }) => <button key={id} type="button" role="tab" aria-selected={period === id} className={period === id ? "view-tab active" : "view-tab"} onClick={() => setPeriod(id)}>{label}</button>)}</div>
+                <div className="period-controls"><button className="icon-button" type="button" aria-label="Предыдущий период" onClick={() => setSelectedDate(shiftDate(selectedDate, period === "week" ? -7 : -1, period === "week" ? "day" : period))}><ArrowLeft size={16} /></button><h3 className="period-title">{formatPeriod(selectedDate, period)}</h3><button className="icon-button" type="button" aria-label="Следующий период" onClick={() => setSelectedDate(shiftDate(selectedDate, period === "week" ? 7 : 1, period === "week" ? "day" : period))}><ArrowRight size={16} /></button></div>
                 <button className={showArchive ? "button button-primary" : "button button-secondary"} type="button" onClick={() => { setShowArchive((visible) => !visible); setRecordEditor(null); }}><Archive size={15} />{showArchive ? "Вернуться к плану" : `Архив (${archivedRecords.length})`}</button>
               </div>
               {!showArchive && <WorkspaceProgress stats={progressStats} periodLabel={formatPeriod(selectedDate, period)} />}
@@ -829,7 +826,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
               ) : (
               <>
               <section className="workspace-record-section">
-                <div className="section-heading"><div><span className="section-kicker">РћР±С‰РёРµ С†РµР»Рё Рё РїСЂРѕРіСЂРµСЃСЃ</span><h3>Р¦РµР»Рё</h3></div><button className="button button-primary" type="button" onClick={() => setRecordEditor({ kind: "goal" })}><Plus size={16} /> РќРѕРІР°СЏ С†РµР»СЊ</button></div>
+                <div className="section-heading"><div><span className="section-kicker">Общие цели и прогресс</span><h3>Цели</h3></div><button className="button button-primary" type="button" onClick={() => setRecordEditor({ kind: "goal" })}><Plus size={16} /> Новая цель</button></div>
                 {visibleGoals.length ? <div className="shared-goal-list">{visibleGoals.map((goal) => {
                   const progress = getGoalProgress(
                     goal.id,
@@ -837,17 +834,17 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
                     records.tasks.filter((item) => !item.archivedAt),
                   );
                   const parent = records.goals.find((item) => item.id === goal.parentId);
-                  const creator = names.get(goal.createdBy) ?? "РЈС‡Р°СЃС‚РЅРёРє";
-                  return <article className="shared-goal-row" key={goal.id}><span className={`period-badge badge-${goal.period}`}>{PERIOD_NAMES[goal.period]}</span><div className="shared-record-content"><div><strong>{goal.title}</strong>{goal.archivedAt && <span className="archive-label">В архиве</span>}<span className={`priority-pill priority-${goal.priority}`}>{goal.priority}</span></div><small>{goal.startDate} вЂ” {goal.endDate} В· РЎРѕР·РґР°Р»: {creator}{parent ? ` В· РЎРІСЏР·Р°РЅР° СЃ: ${parent.title}` : ""}</small>{goal.notes && <p>{goal.notes}</p>}<div className="goal-progress-row"><div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div><small>{progress.completed}/{progress.total} Р·Р°РґР°С‡ В· {progress.percent}%</small></div></div><div className="goal-actions"><button className="icon-button" type="button" title="Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ С†РµР»СЊ" aria-label={`Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ С†РµР»СЊ ${goal.title}`} onClick={() => setRecordEditor({ kind: "goal", record: goal })}>вњЋ</button><RecordHistory workspaceId={selectedId} recordId={goal.id} recordType="goal" members={records.members} archived={false} canManage={canManageArchive} onArchive={() => toggleArchive("goal", goal)} /><button className="icon-button danger-hover" type="button" title="РЈРґР°Р»РёС‚СЊ С†РµР»СЊ" aria-label={`РЈРґР°Р»РёС‚СЊ С†РµР»СЊ ${goal.title}`} disabled={Boolean(busy)} onClick={() => deleteGoal(goal)}><Trash2 size={15} /></button></div></article>;
-                })}</div> : <p className="workspace-hint">РќР° СЌС‚РѕС‚ РїРµСЂРёРѕРґ РѕР±С‰РёС… С†РµР»РµР№ РЅРµС‚.</p>}
+                  const creator = names.get(goal.createdBy) ?? "Участник";
+                  return <article className="shared-goal-row" key={goal.id}><span className={`period-badge badge-${goal.period}`}>{PERIOD_NAMES[goal.period]}</span><div className="shared-record-content"><div><strong>{goal.title}</strong>{goal.archivedAt && <span className="archive-label">В архиве</span>}<span className={`priority-pill priority-${goal.priority}`}>{goal.priority}</span></div><small>{goal.startDate} — {goal.endDate} · Создал: {creator}{parent ? ` · Связана с: ${parent.title}` : ""}</small>{goal.notes && <p>{goal.notes}</p>}<div className="goal-progress-row"><div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div><small>{progress.completed}/{progress.total} задач · {progress.percent}%</small></div></div><div className="goal-actions"><button className="icon-button" type="button" title="Редактировать цель" aria-label={`Редактировать цель ${goal.title}`} onClick={() => setRecordEditor({ kind: "goal", record: goal })}>✎</button><RecordHistory workspaceId={selectedId} recordId={goal.id} recordType="goal" members={records.members} archived={false} canManage={canManageArchive} onArchive={() => toggleArchive("goal", goal)} /><button className="icon-button danger-hover" type="button" title="Удалить цель" aria-label={`Удалить цель ${goal.title}`} disabled={Boolean(busy)} onClick={() => deleteGoal(goal)}><Trash2 size={15} /></button></div></article>;
+                })}</div> : <p className="workspace-hint">На этот период общих целей нет.</p>}
               </section>
               <section className="workspace-record-section">
-                <div className="section-heading"><div><span className="section-kicker">{visibleTasks.length} Р·Р°РґР°С‡ В· {currentRange.start} вЂ” {currentRange.end}</span><h3>Р—Р°РґР°С‡Рё</h3></div><button className="button button-primary" type="button" onClick={() => setRecordEditor({ kind: "task" })}><Plus size={16} /> РќРѕРІР°СЏ Р·Р°РґР°С‡Р°</button></div>
+                <div className="section-heading"><div><span className="section-kicker">{visibleTasks.length} задач · {currentRange.start} — {currentRange.end}</span><h3>Задачи</h3></div><button className="button button-primary" type="button" onClick={() => setRecordEditor({ kind: "task" })}><Plus size={16} /> Новая задача</button></div>
                 {visibleTasks.length ? <div className="shared-task-list">{visibleTasks.map((task) => {
-                  const creator = names.get(task.createdBy) ?? "РЈС‡Р°СЃС‚РЅРёРє";
-                  const assignee = task.assigneeId ? names.get(task.assigneeId) ?? "РЈС‡Р°СЃС‚РЅРёРє" : "РќРµ РЅР°Р·РЅР°С‡РµРЅ";
+                  const creator = names.get(task.createdBy) ?? "Участник";
+                  const assignee = task.assigneeId ? names.get(task.assigneeId) ?? "Участник" : "Не назначен";
                   const linkedGoal = records.goals.find((goal) => goal.id === task.goalId);
-                  const done = task.status === "Р’С‹РїРѕР»РЅРµРЅРѕ";
+                  const done = task.status === "Выполнено";
                   const taskComments = records.comments.filter((comment) => comment.taskId === task.id);
                   return (
                     <article className={`shared-task-row${done ? " task-done" : ""}`} key={task.id}>
@@ -926,7 +923,7 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
                       </div>
                     </article>
                   );
-                })}</div> : <p className="workspace-hint">РќР° СЌС‚РѕС‚ РїРµСЂРёРѕРґ РѕР±С‰РёС… Р·Р°РґР°С‡ РЅРµС‚.</p>}
+                })}</div> : <p className="workspace-hint">На этот период общих задач нет.</p>}
               </section>
             </>
               )}
