@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -15,10 +15,12 @@ import {
   Moon,
   Plus,
   Search,
+  Share2,
   Sparkles,
   Sun,
   Target,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -29,8 +31,6 @@ import {
   getNavigationTarget,
   getPeriodRange,
   GOAL_PERIODS,
-  LEGACY_STORAGE_KEY,
-  loadDashboard,
   localDateString,
   mergeDashboards,
   PRIORITIES,
@@ -40,11 +40,18 @@ import {
   THEME_KEY,
 } from "./dashboard.js";
 import {
+  loadWorkspaceOverview,
+  loadWorkspaceRecords,
   loadRemoteDashboard,
+  saveWorkspaceGoal,
+  saveWorkspaceTask,
   supabase,
   supabaseConfigError,
   syncRemoteDashboard,
 } from "./supabase.js";
+import Workspaces from "./Workspaces.jsx";
+import Friends from "./Friends.jsx";
+import { readUserDashboard } from "./userDashboardStorage.js";
 import "./App.css";
 
 const VIEW_OPTIONS = [
@@ -72,27 +79,6 @@ function dashboardsMatch(first, second) {
     tasks: [...dashboard.tasks].sort((a, b) => a.id.localeCompare(b.id)),
   });
   return JSON.stringify(normalize(first)) === JSON.stringify(normalize(second));
-}
-
-function readLocalDashboard(userId) {
-  const localKey = `${STORAGE_KEY}:${userId}`;
-  const scopedValue = localStorage.getItem(localKey);
-  const sourceValue = scopedValue ?? localStorage.getItem(STORAGE_KEY);
-  const legacyValue = scopedValue === null ? localStorage.getItem(LEGACY_STORAGE_KEY) : null;
-  const storage = {
-    getItem(key) {
-      if (key === STORAGE_KEY) return sourceValue;
-      if (key === LEGACY_STORAGE_KEY) return legacyValue;
-      return null;
-    },
-  };
-  return {
-    dashboard: loadDashboard(storage),
-    exists: scopedValue !== null || sourceValue !== null || legacyValue !== null,
-    isScoped: scopedValue !== null,
-    pending: localStorage.getItem(`${localKey}:pending`) === "true",
-    revision: Number(localStorage.getItem(`${localKey}:revision`) ?? 0),
-  };
 }
 
 function AuthScreen({
@@ -258,7 +244,11 @@ function Modal({ title, subtitle, onClose, children }) {
   );
 }
 
-function GoalDialog({ goal, goals, selectedDate, onClose, onSave }) {
+function GoalDialog({ goal, goals, selectedDate, workspaceOptions, overviewLoading, onClose, onSave }) {
+  const [workspaceGoalsState, setWorkspaceGoals] = useState({ workspaceId: "", goals: [] });
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => {
     const range = getGoalDefaultRange(selectedDate, goal?.period ?? "month");
     return {
@@ -269,17 +259,38 @@ function GoalDialog({ goal, goals, selectedDate, onClose, onSave }) {
       parentId: goal?.parentId ?? "",
       priority: goal?.priority ?? "Средний",
       notes: goal?.notes ?? "",
+      workspaceId: "",
+      destinationChosen: Boolean(goal),
     };
   });
+  const workspaceGoals = workspaceGoalsState.workspaceId === form.workspaceId ? workspaceGoalsState.goals : [];
+  const goalOptions = form.workspaceId ? workspaceGoals : goals;
+  useEffect(() => {
+    if (!form.workspaceId) return undefined;
+    let active = true;
+    loadWorkspaceRecords(form.workspaceId)
+      .then((data) => {
+        if (active) setWorkspaceGoals({ workspaceId: form.workspaceId, goals: data.goals });
+      })
+      .catch((error) => {
+        if (active) setFormError(`Не удалось загрузить цели пространства: ${getErrorMessage(error)}`);
+      })
+      .finally(() => {
+        if (active) setWorkspaceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.workspaceId]);
 
   const parentPeriod = form.period === "month"
     ? "year"
     : form.period === "week" ? "month" : form.period === "day" ? "week" : null;
-  const parents = matchingParents(form.period, form.startDate, form.endDate, goals, goal?.id);
+  const parents = matchingParents(form.period, form.startDate, form.endDate, goalOptions, goal?.id);
 
   function changePeriod(period) {
     const range = getGoalDefaultRange(selectedDate, period);
-    const matching = matchingParents(period, range.start, range.end, goals, goal?.id);
+    const matching = matchingParents(period, range.start, range.end, goalOptions, goal?.id);
     setForm((current) => ({
       ...current,
       period,
@@ -291,7 +302,7 @@ function GoalDialog({ goal, goals, selectedDate, onClose, onSave }) {
 
   function changeDate(field, value) {
     const next = { ...form, [field]: value };
-    const matching = matchingParents(next.period, next.startDate, next.endDate, goals, goal?.id);
+    const matching = matchingParents(next.period, next.startDate, next.endDate, goalOptions, goal?.id);
     setForm({
       ...next,
       parentId: matching.some((item) => item.id === form.parentId)
@@ -300,17 +311,29 @@ function GoalDialog({ goal, goals, selectedDate, onClose, onSave }) {
     });
   }
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
+    if (!form.destinationChosen) {
+      setFormError("Выберите, где хранить цель: лично или в рабочем пространстве.");
+      return;
+    }
     if (!form.title.trim() || !form.startDate || !form.endDate || form.endDate < form.startDate) return;
-    onSave({
-      ...goal,
-      ...form,
-      title: form.title.trim(),
-      parentId: form.parentId || null,
-      id: goal?.id ?? createId(),
-    });
-    onClose();
+    setSaving(true);
+    setFormError("");
+    try {
+      await onSave({
+        ...goal,
+        ...form,
+        title: form.title.trim(),
+        parentId: form.parentId || null,
+        id: goal?.id ?? createId(),
+      });
+      onClose();
+    } catch (error) {
+      setFormError(getErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -320,6 +343,8 @@ function GoalDialog({ goal, goals, selectedDate, onClose, onSave }) {
       onClose={onClose}
     >
       <form className="dialog-form" onSubmit={submit}>
+        {!goal && overviewLoading && <p className="workspace-hint field-wide">Проверяем доступные пространства…</p>}
+        {!goal && <label className="field field-wide"><span>Где хранить цель?</span><select required disabled={overviewLoading} value={!form.destinationChosen ? "" : form.workspaceId || "__personal__"} onChange={(event) => { const workspaceId = event.target.value === "__personal__" ? "" : event.target.value; setWorkspaceLoading(Boolean(workspaceId)); setForm({ ...form, workspaceId, destinationChosen: true, parentId: "" }); }}><option value="" disabled>Выберите назначение</option><option value="__personal__">Личное</option>{workspaceOptions.map((workspace) => <option key={workspace.id} value={workspace.id}>Пространство: {workspace.name}</option>)}</select><small>Личные цели видны только вам.</small></label>}
         <label className="field field-wide">
           <span>Название цели</span>
           <input autoFocus required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Например, запустить личный сайт" />
@@ -347,27 +372,32 @@ function GoalDialog({ goal, goals, selectedDate, onClose, onSave }) {
         {parentPeriod && (
           <label className="field field-wide">
             <span>Связать с целью · необязательно</span>
-            <select value={parents.some((item) => item.id === form.parentId) ? form.parentId : ""} onChange={(event) => setForm({ ...form, parentId: event.target.value })}>
+            <select disabled={workspaceLoading} value={parents.some((item) => item.id === form.parentId) ? form.parentId : ""} onChange={(event) => setForm({ ...form, parentId: event.target.value })}>
               <option value="">Без связи</option>
               {parents.map((parent) => <option value={parent.id} key={parent.id}>{parent.title}</option>)}
             </select>
-            <small>{parents.length ? `Можно связать с целью на уровень выше (${PERIOD_LABELS[parentPeriod].toLowerCase()}).` : `Сначала создайте цель на уровень выше (${PERIOD_LABELS[parentPeriod].toLowerCase()}) для этой даты.`}</small>
+            <small>{workspaceLoading ? "Загружаем цели пространства…" : parents.length ? `Можно связать с целью на уровень выше (${PERIOD_LABELS[parentPeriod].toLowerCase()}).` : `Сначала создайте цель на уровень выше (${PERIOD_LABELS[parentPeriod].toLowerCase()}) для этой даты.`}</small>
           </label>
         )}
         <label className="field field-wide">
           <span>Заметки</span>
           <textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Что поможет достичь цели?" />
         </label>
+        {formError && <p className="sync-alert field-wide" role="alert">{formError}</p>}
         <div className="dialog-actions field-wide">
           <button type="button" className="button button-quiet" onClick={onClose}>Отмена</button>
-          <button type="submit" className="button button-primary"><Check size={17} /> Сохранить цель</button>
+          <button type="submit" className="button button-primary" disabled={saving || workspaceLoading || (!goal && overviewLoading)}><Check size={17} /> {saving ? "Сохраняем…" : "Сохранить цель"}</button>
         </div>
       </form>
     </Modal>
   );
 }
 
-function TaskDialog({ task, goals, selectedDate, onClose, onSave }) {
+function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoading, userId, onClose, onSave }) {
+  const [workspaceGoalsState, setWorkspaceGoals] = useState({ workspaceId: "", goals: [] });
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => ({
     title: task?.title ?? "",
     category: task?.category ?? "Работа",
@@ -378,14 +408,48 @@ function TaskDialog({ task, goals, selectedDate, onClose, onSave }) {
     status: task?.status ?? "К выполнению",
     notes: task?.notes ?? "",
     goalId: task?.goalId ?? "",
+    workspaceId: "",
+    destinationChosen: Boolean(task),
   }));
-  const availableGoals = goals.filter((goal) => form.date >= goal.startDate && form.date <= goal.endDate);
+  const workspaceGoals = workspaceGoalsState.workspaceId === form.workspaceId ? workspaceGoalsState.goals : [];
+  const goalOptions = form.workspaceId ? workspaceGoals : goals;
+  const availableGoals = goalOptions.filter((goal) => form.date >= goal.startDate && form.date <= goal.endDate);
 
-  function submit(event) {
+  useEffect(() => {
+    if (!form.workspaceId) return undefined;
+    let active = true;
+    loadWorkspaceRecords(form.workspaceId)
+      .then((data) => {
+        if (active) setWorkspaceGoals({ workspaceId: form.workspaceId, goals: data.goals });
+      })
+      .catch((error) => {
+        if (active) setFormError(`Не удалось загрузить цели пространства: ${getErrorMessage(error)}`);
+      })
+      .finally(() => {
+        if (active) setWorkspaceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.workspaceId]);
+
+  async function submit(event) {
     event.preventDefault();
+    if (!form.destinationChosen) {
+      setFormError("Выберите, где хранить задачу: лично или в рабочем пространстве.");
+      return;
+    }
     if (!form.title.trim() || !form.date) return;
-    onSave({ ...task, ...form, title: form.title.trim(), goalId: form.goalId || null, id: task?.id ?? createId() });
-    onClose();
+    setSaving(true);
+    setFormError("");
+    try {
+      await onSave({ ...task, ...form, title: form.title.trim(), goalId: form.goalId || null, id: task?.id ?? createId(), assigneeId: userId });
+      onClose();
+    } catch (error) {
+      setFormError(getErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -395,6 +459,8 @@ function TaskDialog({ task, goals, selectedDate, onClose, onSave }) {
       onClose={onClose}
     >
       <form className="dialog-form" onSubmit={submit}>
+        {!task && overviewLoading && <p className="workspace-hint field-wide">Проверяем доступные пространства…</p>}
+        {!task && <label className="field field-wide"><span>Где хранить задачу?</span><select required disabled={overviewLoading} value={!form.destinationChosen ? "" : form.workspaceId || "__personal__"} onChange={(event) => { const workspaceId = event.target.value === "__personal__" ? "" : event.target.value; setWorkspaceLoading(Boolean(workspaceId)); setForm({ ...form, workspaceId, destinationChosen: true, goalId: "" }); }}><option value="" disabled>Выберите назначение</option><option value="__personal__">Личное</option>{workspaceOptions.map((workspace) => <option key={workspace.id} value={workspace.id}>Пространство: {workspace.name}</option>)}</select><small>Личные задачи видны только вам.</small></label>}
         <label className="field field-wide">
           <span>Название задачи</span>
           <input autoFocus required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Что нужно сделать?" />
@@ -403,7 +469,7 @@ function TaskDialog({ task, goals, selectedDate, onClose, onSave }) {
           <span>Дата</span>
           <input required type="date" value={form.date} onChange={(event) => {
             const date = event.target.value;
-            const keepsGoal = goals.some((goal) => goal.id === form.goalId && date >= goal.startDate && date <= goal.endDate);
+            const keepsGoal = goalOptions.some((goal) => goal.id === form.goalId && date >= goal.startDate && date <= goal.endDate);
             setForm({ ...form, date, goalId: keepsGoal ? form.goalId : "" });
           }} />
         </label>
@@ -435,7 +501,7 @@ function TaskDialog({ task, goals, selectedDate, onClose, onSave }) {
         </label>
         <label className="field field-wide">
           <span>Связанная цель · необязательно</span>
-          <select value={availableGoals.some((goal) => goal.id === form.goalId) ? form.goalId : ""} onChange={(event) => setForm({ ...form, goalId: event.target.value })}>
+          <select disabled={workspaceLoading} value={availableGoals.some((goal) => goal.id === form.goalId) ? form.goalId : ""} onChange={(event) => setForm({ ...form, goalId: event.target.value })}>
             <option value="">Без связи</option>
             {availableGoals.map((goal) => <option key={goal.id} value={goal.id}>{PERIOD_LABELS[goal.period]} · {goal.title}</option>)}
           </select>
@@ -444,10 +510,47 @@ function TaskDialog({ task, goals, selectedDate, onClose, onSave }) {
           <span>Заметки</span>
           <textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Дополнительные детали" />
         </label>
+        {formError && <p className="sync-alert field-wide" role="alert">{formError}</p>}
         <div className="dialog-actions field-wide">
           <button type="button" className="button button-quiet" onClick={onClose}>Отмена</button>
-          <button type="submit" className="button button-primary"><Check size={17} /> Сохранить задачу</button>
+          <button type="submit" className="button button-primary" disabled={saving || workspaceLoading || (!task && overviewLoading)}><Check size={17} /> {saving ? "Сохраняем…" : "Сохранить задачу"}</button>
         </div>
+      </form>
+    </Modal>
+  );
+}
+
+function TaskShareDialog({ task, workspaceOptions, onClose, onShare }) {
+  const [workspaceId, setWorkspaceId] = useState(workspaceOptions[0]?.id ?? "");
+  const [mode, setMode] = useState("copy");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    const workspace = workspaceOptions.find((item) => item.id === workspaceId);
+    if (!workspace) return;
+    const action = mode === "move" ? "перенести" : "скопировать";
+    if (!window.confirm(`${action[0].toLocaleUpperCase("ru")}${action.slice(1)} задачу «${task.title}» в пространство «${workspace.name}»?${mode === "move" ? " Личная задача будет удалена после успешного переноса." : ""}`)) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onShare(task, workspaceId, mode);
+      onClose();
+    } catch (shareError) {
+      setError(getErrorMessage(shareError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Перенести задачу в пространство" subtitle="Действие требует подтверждения. Связь с личной целью не переносится, личная цель останется приватной." onClose={onClose}>
+      <form className="dialog-form" onSubmit={submit}>
+        <label className="field field-wide"><span>Пространство назначения</span><select required value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>{workspaceOptions.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+        <label className="field field-wide"><span>Действие</span><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="copy">Скопировать — оставить личную задачу</option><option value="move">Перенести — удалить личную после сохранения копии</option></select></label>
+        {error && <p className="sync-alert field-wide" role="alert">{error}</p>}
+        <div className="dialog-actions field-wide"><button className="button button-quiet" type="button" onClick={onClose}>Отмена</button><button className="button button-primary" type="submit" disabled={saving || !workspaceOptions.length}><Share2 size={16} />{saving ? "Сохраняем…" : mode === "move" ? "Подтвердить перенос" : "Подтвердить копирование"}</button></div>
       </form>
     </Modal>
   );
@@ -482,7 +585,27 @@ function App() {
   const [search, setSearch] = useState("");
   const [goalDialog, setGoalDialog] = useState(undefined);
   const [taskDialog, setTaskDialog] = useState(undefined);
+  const [taskShareDialog, setTaskShareDialog] = useState(null);
+  const [activeSection, setActiveSection] = useState("dashboard");
+  const [workspaceOverview, setWorkspaceOverview] = useState({ workspaces: [], invitations: [] });
+  const [workspaceOverviewError, setWorkspaceOverviewError] = useState("");
+  const [workspaceOverviewLoading, setWorkspaceOverviewLoading] = useState(false);
   const userId = user?.id;
+  const refreshWorkspaceOverview = useCallback(async () => {
+    if (!userId) return false;
+    setWorkspaceOverviewLoading(true);
+    try {
+      const overview = await loadWorkspaceOverview(userId);
+      setWorkspaceOverview(overview);
+      setWorkspaceOverviewError("");
+      return overview;
+    } catch (error) {
+      setWorkspaceOverviewError(`Не удалось обновить рабочие пространства: ${getErrorMessage(error)}`);
+      return false;
+    } finally {
+      setWorkspaceOverviewLoading(false);
+    }
+  }, [userId]);
   const revisionRef = useRef(0);
   const skipSyncOnce = useRef(false);
   const dirtyRef = useRef(false);
@@ -522,6 +645,72 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!userId || !supabase) {
+      setWorkspaceOverview({ workspaces: [], invitations: [] });
+      setWorkspaceOverviewError("");
+      return undefined;
+    }
+    let active = true;
+    setWorkspaceOverviewLoading(true);
+    loadWorkspaceOverview(userId)
+      .then((overview) => {
+        if (!active) return;
+        setWorkspaceOverview(overview);
+        setWorkspaceOverviewError("");
+      })
+      .catch((error) => {
+        if (active) setWorkspaceOverviewError(`Не удалось загрузить рабочие пространства: ${getErrorMessage(error)}`);
+      })
+      .finally(() => {
+        if (active) setWorkspaceOverviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !supabase) return undefined;
+    let active = true;
+    async function refreshInvitations() {
+      try {
+        const overview = await loadWorkspaceOverview(userId);
+        if (active) {
+          setWorkspaceOverview(overview);
+          setWorkspaceOverviewError("");
+        }
+      } catch (error) {
+        if (active) setWorkspaceOverviewError(`Не удалось обновить приглашения: ${getErrorMessage(error)}`);
+      }
+    }
+
+    const channel = supabase
+      .channel(`workspace-invitations-${userId}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "workspace_invitations",
+        filter: `invitee_id=eq.${userId}`,
+      }, refreshInvitations)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "workspace_invitations",
+        filter: `invited_by=eq.${userId}`,
+      }, refreshInvitations)
+      .subscribe((status, subscriptionError) => {
+        if (active && (status === "CHANNEL_ERROR" || status === "TIMED_OUT")) {
+          setWorkspaceOverviewError(`Подписка на приглашения недоступна: ${subscriptionError?.message ?? status}`);
+        }
+      });
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  useEffect(() => {
     if (!authReady || !userId || !supabase) return undefined;
 
     let active = true;
@@ -538,7 +727,7 @@ function App() {
     async function initialize() {
       let local;
       try {
-        local = readLocalDashboard(userId);
+        local = readUserDashboard(userId);
       } catch (error) {
         if (active) setLoadError(`Не удалось прочитать локальные данные: ${getErrorMessage(error)}`);
         return;
@@ -894,22 +1083,57 @@ function App() {
     }
   }
 
-  function saveGoal(goal) {
+  async function saveGoal(goal) {
+    if (goal.workspaceId) {
+      await saveWorkspaceGoal(userId, goal.workspaceId, { ...goal, createdBy: userId });
+      await refreshWorkspaceOverview();
+      return;
+    }
+    const personalGoal = { ...goal };
+    delete personalGoal.workspaceId;
+    delete personalGoal.destinationChosen;
     updateDashboard((current) => reconcileRelationships(
-      current.goals.some((item) => item.id === goal.id)
-        ? current.goals.map((item) => item.id === goal.id ? goal : item)
-        : [...current.goals, goal],
+      current.goals.some((item) => item.id === personalGoal.id)
+        ? current.goals.map((item) => item.id === personalGoal.id ? personalGoal : item)
+        : [...current.goals, personalGoal],
       current.tasks,
     ));
   }
 
-  function saveTask(task) {
+  async function saveTask(task) {
+    if (task.workspaceId) {
+      await saveWorkspaceTask(userId, task.workspaceId, { ...task, createdBy: userId, assigneeId: userId });
+      await refreshWorkspaceOverview();
+      return;
+    }
+    const personalTask = { ...task };
+    delete personalTask.workspaceId;
+    delete personalTask.assigneeId;
+    delete personalTask.destinationChosen;
     updateDashboard((current) => ({
       ...current,
-      tasks: current.tasks.some((item) => item.id === task.id)
-        ? current.tasks.map((item) => item.id === task.id ? task : item)
-        : [...current.tasks, task],
+      tasks: current.tasks.some((item) => item.id === personalTask.id)
+        ? current.tasks.map((item) => item.id === personalTask.id ? personalTask : item)
+        : [...current.tasks, personalTask],
     }));
+  }
+
+  async function sharePersonalTask(task, workspaceId, mode) {
+    await saveWorkspaceTask(userId, workspaceId, {
+      ...task,
+      id: createId(),
+      workspaceId,
+      createdBy: userId,
+      assigneeId: userId,
+      goalId: null,
+    });
+    if (mode === "move") {
+      updateDashboard((current) => ({
+        ...current,
+        tasks: current.tasks.filter((item) => item.id !== task.id),
+      }));
+    }
+    await refreshWorkspaceOverview();
   }
 
   function deleteGoal(goal) {
@@ -1014,6 +1238,12 @@ function App() {
           </div>
         </header>
 
+        <nav className="section-tabs" aria-label="Разделы дэшборда">
+          <button type="button" className={activeSection === "dashboard" ? "section-tab active" : "section-tab"} aria-current={activeSection === "dashboard" ? "page" : undefined} onClick={() => setActiveSection("dashboard")}>Личные планы</button>
+          <button type="button" className={activeSection === "spaces" ? "section-tab active" : "section-tab"} aria-current={activeSection === "spaces" ? "page" : undefined} onClick={() => { setActiveSection("spaces"); refreshWorkspaceOverview(); }}><Users size={15} /> Пространства{workspaceOverview.invitations.some((invitation) => invitation.inviteeId === user.id && invitation.status === "pending") && <span className="section-tab-badge">!</span>}</button>
+          <button type="button" className={activeSection === "friends" ? "section-tab active" : "section-tab"} aria-current={activeSection === "friends" ? "page" : undefined} onClick={() => setActiveSection("friends")}><Users size={15} /> Друзья</button>
+        </nav>
+
         {syncError && !remoteConflict && (
           <p className="sync-alert sync-alert-inline" role="alert">
             {syncError}
@@ -1030,7 +1260,20 @@ function App() {
           </section>
         )}
         {authError && <p className="sync-alert sync-alert-inline" role="alert">{authError}</p>}
+        {activeSection !== "spaces" && workspaceOverviewError && <p className="sync-alert sync-alert-inline" role="alert">{workspaceOverviewError}</p>}
 
+        {activeSection === "spaces" ? (
+          <Workspaces
+            userId={user.id}
+            overview={workspaceOverview}
+            overviewError={workspaceOverviewError}
+            overviewLoading={workspaceOverviewLoading}
+            onRefreshOverview={refreshWorkspaceOverview}
+          />
+        ) : activeSection === "friends" ? (
+          <Friends userId={user.id} />
+        ) : (
+        <>
         <section className="welcome-panel">
           <div className="welcome-copy">
             <div className="eyebrow"><Sparkles size={14} /> Личное пространство продуктивности</div>
@@ -1166,7 +1409,7 @@ function App() {
                       <td><span className={`priority-pill priority-${task.priority}`}>{task.priority}</span></td>
                       <td><span className={`status-pill status-${task.status === "Выполнено" ? "done" : task.status === "В процессе" ? "doing" : "todo"}`}><Circle size={7} fill="currentColor" />{task.status}</span></td>
                       <td><span className="linked-goal">{linkedGoal ? <><Target size={13} />{linkedGoal.title}</> : <span className="unlinked">Без связи</span>}</span></td>
-                      <td className="row-actions"><button className="icon-button" type="button" onClick={() => setTaskDialog(task)} title="Редактировать задачу" aria-label={`Редактировать задачу ${task.title}`}><ChevronDown size={16} /></button><button className="icon-button danger-hover" type="button" onClick={() => deleteTask(task)} title="Удалить задачу" aria-label={`Удалить задачу ${task.title}`}><Trash2 size={15} /></button></td>
+                      <td className="row-actions">{workspaceOverview.workspaces.length > 0 && <button className="icon-button" type="button" onClick={() => setTaskShareDialog(task)} title="Скопировать или перенести в пространство" aria-label={`Скопировать или перенести задачу ${task.title} в пространство`}><Share2 size={15} /></button>}<button className="icon-button" type="button" onClick={() => setTaskDialog(task)} title="Редактировать задачу" aria-label={`Редактировать задачу ${task.title}`}><ChevronDown size={16} /></button><button className="icon-button danger-hover" type="button" onClick={() => deleteTask(task)} title="Удалить задачу" aria-label={`Удалить задачу ${task.title}`}><Trash2 size={15} /></button></td>
                     </tr>
                   );
                 })}
@@ -1178,10 +1421,13 @@ function App() {
         </section>
 
         <footer className="app-footer"><span><Sparkles size={14} /> Данные синхронизируются между вашими устройствами</span><button type="button" onClick={() => { if (!window.confirm("Удалить все цели и задачи? Это действие нельзя отменить.")) return; updateDashboard(EMPTY_DASHBOARD); }}>Очистить все данные</button></footer>
+        </>
+        )}
       </div>
 
-      {goalDialog !== undefined && <GoalDialog key={goalDialog?.id ?? "new-goal"} goal={goalDialog} goals={goals} selectedDate={selectedDate} onClose={() => setGoalDialog(undefined)} onSave={saveGoal} />}
-      {taskDialog !== undefined && <TaskDialog key={taskDialog?.id ?? "new-task"} task={taskDialog} goals={goals} selectedDate={selectedDate} onClose={() => setTaskDialog(undefined)} onSave={saveTask} />}
+      {goalDialog !== undefined && <GoalDialog key={goalDialog?.id ?? "new-goal"} goal={goalDialog} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} onClose={() => setGoalDialog(undefined)} onSave={saveGoal} />}
+      {taskDialog !== undefined && <TaskDialog key={taskDialog?.id ?? "new-task"} task={taskDialog} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} userId={user.id} onClose={() => setTaskDialog(undefined)} onSave={saveTask} />}
+      {taskShareDialog && <TaskShareDialog key={taskShareDialog.id} task={taskShareDialog} workspaceOptions={workspaceOverview.workspaces} onClose={() => setTaskShareDialog(null)} onShare={sharePersonalTask} />}
     </main>
   );
 }
