@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test src/dashboard.test.js src/workspaceArchive.test.js src/workspaceProgress.test.js src/userDashboardStorage.test.js src/errorMessage.test.js",
+    "test": "node --test src/dashboard.test.js src/workspaceArchive.test.js src/workspaceProgress.test.js src/userDashboardStorage.test.js src/errorMessage.test.js src/username.test.js src/recurrence.test.js src/calendar.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

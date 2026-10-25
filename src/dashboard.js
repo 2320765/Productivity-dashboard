@@ -1,3 +1,5 @@
+import { expandTask } from "./recurrence.js";
+
 export const STORAGE_KEY = "dayflow-productivity-v2";
 export const LEGACY_STORAGE_KEY = "dayflow-dashboard-v1";
 export const THEME_KEY = "dayflow-theme-v1";
@@ -199,7 +201,14 @@ export function getGoalProgress(goalId, goals, tasks) {
     }
   }
 
-  const linkedTasks = tasks.filter((task) => task.goalId && descendants.has(task.goalId));
+  const goalsById = new Map(goals.map((goal) => [goal.id, goal]));
+  const linkedTasks = tasks
+    .filter((task) => task.goalId && descendants.has(task.goalId))
+    .flatMap((task) => {
+      if (!task.recurrence) return [task];
+      const goal = goalsById.get(task.goalId);
+      return goal ? expandTask(task, goal.startDate, goal.endDate) : [];
+    });
   const completed = linkedTasks.filter((task) => task.status === "Выполнено").length;
   return {
     completed,

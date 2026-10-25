@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { primaryName } from "./username.js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -16,6 +17,35 @@ export const supabaseConfigError = hasSupabaseConfig
 
 function throwIfError(error) {
   if (error) throw error;
+}
+
+// Если миграция usernames ещё не применена, интерфейс продолжает работать без username.
+async function loadUsernameMap(userIds) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { data, error } = await supabase.rpc("usernames_for", { p_user_ids: ids });
+  if (error || !data) return new Map();
+  return new Map(data.map((row) => [row.user_id, row.username]));
+}
+
+export async function loadMyUsername() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return "";
+  const { data, error } = await supabase.from("profiles").select("username").eq("user_id", user.id).maybeSingle();
+  if (error) return "";
+  return data?.username ?? "";
+}
+
+export async function saveUsername(username) {
+  const { data, error } = await supabase.rpc("set_username", { p_username: username });
+  if (error) {
+    const text = `${error.message ?? ""}`;
+    if (error.code === "23505" || /already taken/i.test(text)) throw new Error("Этот username уже занят.");
+    if (/reserved/i.test(text)) throw new Error("Этот username зарезервирован, выберите другой.");
+    if (/invalid username/i.test(text)) throw new Error("Допустимы латинские буквы, цифры и _, длина 3–20, начало с буквы.");
+    throw error;
+  }
+  return data;
 }
 
 export async function setWorkspaceRecordArchived(workspaceId, recordType, recordId, archived) {
@@ -53,6 +83,7 @@ function mapTask(row) {
     status: row.status,
     notes: row.notes,
     goalId: row.goal_id,
+    ...(row.recurrence ? { recurrence: row.recurrence } : {}),
   };
 }
 
@@ -76,7 +107,18 @@ export async function loadRemoteDashboard(userId) {
   };
 }
 
-export async function syncRemoteDashboard(userId, dashboard, expectedRevision) {
+// Повторяющиеся id ломают первичный ключ (user_id, id); дубликаты получают стабильный суффикс.
+function withUniqueIds(items) {
+  const seen = new Map();
+  return items.map((item) => {
+    const count = seen.get(item.id) ?? 0;
+    seen.set(item.id, count + 1);
+    return count === 0 ? item : { ...item, id: `${item.id}-dup${count}` };
+  });
+}
+
+export async function syncRemoteDashboard(userId, rawDashboard, expectedRevision) {
+  const dashboard = { goals: withUniqueIds(rawDashboard.goals), tasks: withUniqueIds(rawDashboard.tasks) };
   const { data, error } = await supabase.rpc("sync_dashboard", {
     p_goals: dashboard.goals.map((goal) => ({
       id: goal.id,
@@ -101,6 +143,7 @@ export async function syncRemoteDashboard(userId, dashboard, expectedRevision) {
       status: task.status,
       notes: task.notes ?? "",
       goal_id: task.goalId ?? null,
+      recurrence: task.recurrence ?? null,
     })),
     p_expected_revision: expectedRevision,
   });
@@ -222,13 +265,15 @@ export async function loadWorkspaceRecords(workspaceId) {
   throwIfError(goalsResult.error);
   throwIfError(tasksResult.error);
   throwIfError(commentsResult.error);
+  const usernames = await loadUsernameMap(membersResult.data.map((member) => member.user_id));
 
   return {
     workspace: mapWorkspace(workspaceResult.data),
     members: membersResult.data.map((member) => ({
       userId: member.user_id,
       role: member.role,
-      name: member.display_name,
+      name: primaryName(member.display_name, usernames.get(member.user_id)),
+      username: usernames.get(member.user_id) ?? "",
     })),
     goals: goalsResult.data.map(mapWorkspaceGoal),
     tasks: tasksResult.data.map(mapWorkspaceTask),
@@ -250,6 +295,15 @@ export async function sendWorkspaceInvitation(workspaceId, email) {
     p_workspace_id: workspaceId,
     p_email: email,
   });
+  throwIfError(error);
+}
+
+export async function sendWorkspaceInvitationByUsername(workspaceId, username) {
+  const { error } = await supabase.rpc("send_workspace_invitation_by_username", {
+    p_workspace_id: workspaceId, p_username: username,
+  });
+  if (error?.code === "P0002") throw new Error("Пользователь с таким username не найден.");
+  if (error?.code === "23505") throw new Error("Пользователь уже в пространстве или приглашение уже отправлено.");
   throwIfError(error);
 }
 
@@ -396,13 +450,14 @@ function mapFriend(row) {
 export async function loadFriends() {
   const { data, error } = await supabase.rpc("list_friends");
   throwIfError(error);
-  return data.map(mapFriend);
+  const usernames = await loadUsernameMap(data.map((row) => row.user_id));
+  return data.map((row) => ({ ...mapFriend(row), username: usernames.get(row.user_id) ?? "" }));
 }
 
 export async function lookupFriend(query) {
   const { data, error } = await supabase.rpc("lookup_friend", { p_query: query.trim() });
   throwIfError(error);
-  return data.map((row) => ({ userId: row.user_id, name: row.display_name, avatarUrl: row.avatar_url }));
+  return data.map((row) => ({ userId: row.user_id, name: row.display_name, avatarUrl: row.avatar_url, username: row.username ?? "" }));
 }
 
 export async function sendFriendRequest(userId) {

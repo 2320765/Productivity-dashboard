@@ -50,6 +50,7 @@ import {
   saveWorkspaceTask,
   saveWorkspaceComment,
   sendWorkspaceInvitation,
+  sendWorkspaceInvitationByUsername,
   sendWorkspaceInvitationToUser,
   setWorkspaceMemberRole,
   transferWorkspaceOwnership,
@@ -62,6 +63,7 @@ import {
 import { filterWorkspaceArchive } from "./workspaceArchive.js";
 import { buildWorkspaceProgress } from "./workspaceProgress.js";
 import { getErrorMessage } from "./errorMessage.js";
+import { isEmailQuery, normalizeUsername, primaryName, validateUsername } from "./username.js";
 
 const PERIODS = [
   { id: "year", label: "Год" },
@@ -546,13 +548,21 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
 
   async function submitInvite(event) {
     event.preventDefault();
-    const email = inviteEmail.trim();
-    if (!email) return;
+    const value = inviteEmail.trim();
+    if (!value) return;
+    const byEmail = isEmailQuery(value);
+    if (!byEmail) {
+      const formatError = validateUsername(value);
+      if (formatError) { setError(formatError); return; }
+    }
     const sent = await runAction("invite", async () => {
-      await sendWorkspaceInvitation(selectedId, email);
+      if (byEmail) await sendWorkspaceInvitation(selectedId, value);
+      else await sendWorkspaceInvitationByUsername(selectedId, normalizeUsername(value));
       setInviteEmail("");
     });
-    if (sent) setNotice("Если пользователь с этим адресом зарегистрирован, приглашение появится у него в разделе «Пространства». Email-уведомление не отправляется.");
+    if (sent) setNotice(byEmail
+      ? "Если пользователь с этим адресом зарегистрирован, приглашение появится у него в разделе «Пространства». Email-уведомление не отправляется."
+      : "Приглашение отправлено. Оно появится у пользователя в разделе «Пространства».");
   }
 
   async function inviteFriend(friend) {
@@ -756,11 +766,11 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
                   const pending = overview.invitations.some((item) => item.workspaceId === selectedId && item.inviteeId === friend.userId && item.status === "pending");
                   const accepted = overview.invitations.some((item) => item.workspaceId === selectedId && item.inviteeId === friend.userId && item.status === "accepted");
                   const label = member ? "Участник" : pending ? "Ожидает ответа" : accepted ? "Приглашение принято" : "Можно пригласить";
-                  return <div className="workspace-friend-row" key={friend.userId}><span className="member-avatar">{friend.avatarUrl ? <img src={friend.avatarUrl} alt="" /> : friend.name.slice(0, 1).toLocaleUpperCase("ru")}</span><span className="member-name"><strong>{friend.name}</strong><small>{label}</small></span>{!member && !pending && !accepted && <button className="button button-secondary" type="button" disabled={Boolean(busy)} onClick={() => inviteFriend(friend)}><UserPlus size={14} /> Пригласить</button>}{member && <Check size={16} className="workspace-friend-check" />}</div>;
+                  return <div className="workspace-friend-row" key={friend.userId}><span className="member-avatar">{friend.avatarUrl ? <img src={friend.avatarUrl} alt="" /> : primaryName(friend.name, friend.username).replace(/^@/, "").slice(0, 1).toLocaleUpperCase("ru")}</span><span className="member-name"><strong>{primaryName(friend.name, friend.username)}{friend.username && primaryName(friend.name, friend.username) !== `@${friend.username}` && <span className="username-tag">@{friend.username}</span>}</strong><small>{label}</small></span>{!member && !pending && !accepted && <button className="button button-secondary" type="button" disabled={Boolean(busy)} onClick={() => inviteFriend(friend)}><UserPlus size={14} /> Пригласить</button>}{member && <Check size={16} className="workspace-friend-check" />}</div>;
                 })}</div> : <p className="workspace-hint">Добавьте друзей, чтобы приглашать их сюда. Можно также пригласить зарегистрированного пользователя по email.</p>}
               </div>
               <form className="workspace-invite-form" onSubmit={submitInvite}>
-                <label className="field"><span>Или пригласите зарегистрированного пользователя по email</span><input required type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@example.com" /></label>
+                <label className="field"><span>Или пригласите зарегистрированного пользователя по @username или email</span><input required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} maxLength="320" autoCapitalize="none" placeholder="@username или name@example.com" /></label>
                 <button className="button button-secondary" type="submit" disabled={Boolean(busy)}><UserPlus size={16} />{busy === "invite" ? "Отправляем…" : "Отправить приглашение"}</button>
                 <small>Подходит и для пользователя, который ещё не в друзьях. Приглашение появится у него в разделе «Пространства» после входа.</small>
               </form>
@@ -769,8 +779,8 @@ export default function Workspaces({ userId, overview, overviewError, overviewLo
           <div className="member-list">
             {records.members.map((member) => (
               <div className="member-row" key={member.userId}>
-                <span className="member-avatar">{member.name.slice(0, 1).toLocaleUpperCase("ru")}</span>
-                <span className="member-name"><strong>{member.name}</strong><small>{member.role === "owner" ? "Владелец" : member.role === "admin" ? "Администратор" : "Участник"}{member.userId === userId ? " · Вы" : ""}</small></span>
+                <span className="member-avatar">{member.name.replace(/^@/, "").slice(0, 1).toLocaleUpperCase("ru")}</span>
+                <span className="member-name"><strong>{member.name}{member.username && member.name !== `@${member.username}` && <span className="username-tag">@{member.username}</span>}</strong><small>{member.role === "owner" ? "Владелец" : member.role === "admin" ? "Администратор" : "Участник"}{member.userId === userId ? " · Вы" : ""}</small></span>
                 {selectedWorkspace.role === "owner" && member.role !== "owner" && <select className="member-role-select" aria-label={`Роль ${member.name}`} value={member.role} disabled={Boolean(busy)} onChange={(event) => runAction(`role-${member.userId}`, () => setWorkspaceMemberRole(selectedId, member.userId, event.target.value))}><option value="admin">Администратор</option><option value="member">Участник</option></select>}{["owner", "admin"].includes(selectedWorkspace.role) && member.role === "member" && <button className="icon-button danger-hover" type="button" aria-label={`Удалить участника ${member.name}`} title="Удалить участника" disabled={Boolean(busy)} onClick={() => {
                   if (window.confirm(`Удалить участника «${member.name}»?`)) {
                     runAction(`member-${member.userId}`, () => removeWorkspaceMember(selectedId, member.userId));

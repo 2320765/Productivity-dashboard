@@ -14,6 +14,7 @@ import {
   LogOut,
   Moon,
   Plus,
+  Repeat,
   Search,
   Share2,
   Sparkles,
@@ -41,6 +42,8 @@ import {
 } from "./dashboard.js";
 import {
   loadWorkspaceOverview,
+  loadMyUsername,
+  saveUsername,
   loadWorkspaceRecords,
   loadRemoteDashboard,
   saveWorkspaceGoal,
@@ -51,7 +54,13 @@ import {
 } from "./supabase.js";
 import Workspaces from "./Workspaces.jsx";
 import Friends from "./Friends.jsx";
+import TaskCalendar from "./Calendar.jsx";
 import { getErrorMessage } from "./errorMessage.js";
+import { normalizeUsername, validateUsername } from "./username.js";
+import {
+  buildRecurrence, describeRecurrence, expandTasks, recurrenceToForm, setOccurrenceStatus,
+  stopRecurrenceAfter, WEEKDAY_LABELS, MAX_INTERVAL,
+} from "./recurrence.js";
 import { readUserDashboard } from "./userDashboardStorage.js";
 import "./App.css";
 
@@ -241,6 +250,46 @@ function Modal({ title, subtitle, onClose, children }) {
   );
 }
 
+function ProfileDialog({ email, username, onClose, onSaved }) {
+  const [value, setValue] = useState(username);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const formatError = value.trim() ? validateUsername(value) : "";
+
+  async function submit(event) {
+    event.preventDefault();
+    const invalid = validateUsername(value);
+    if (invalid) { setError(invalid); return; }
+    setSaving(true);
+    setError("");
+    try {
+      onSaved(await saveUsername(normalizeUsername(value)));
+      onClose();
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Профиль" subtitle="Username уникален: по нему вас находят друзья и приглашают в пространства. Email другим пользователям не показывается." onClose={onClose}>
+      <form className="dialog-form" onSubmit={submit}>
+        <label className="field field-wide"><span>Email</span><input value={email} readOnly disabled /></label>
+        <label className="field field-wide">
+          <span>Username</span>
+          <input value={value} onChange={(event) => { setValue(event.target.value); setError(""); }} maxLength="21" autoComplete="off" autoCapitalize="none" spellCheck="false" placeholder="например, anna_lee" required />
+        </label>
+        <small className={formatError || error ? "form-error field-wide" : "workspace-hint field-wide"} role={error ? "alert" : undefined}>{error || formatError || "3–20 символов: латинские буквы, цифры и _, начинается с буквы."}</small>
+        <div className="dialog-actions field-wide">
+          <button className="button button-secondary" type="button" onClick={onClose}>Отмена</button>
+          <button className="button button-primary" type="submit" disabled={saving || Boolean(formatError) || !value.trim() || normalizeUsername(value) === username}>{saving ? "Сохраняем…" : "Сохранить"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function GoalDialog({ goal, goals, selectedDate, workspaceOptions, overviewLoading, onClose, onSave }) {
   const [workspaceGoalsState, setWorkspaceGoals] = useState({ workspaceId: "", goals: [] });
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -390,7 +439,65 @@ function GoalDialog({ goal, goals, selectedDate, workspaceOptions, overviewLoadi
   );
 }
 
-function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoading, userId, onClose, onSave }) {
+function QuickAddTask({ goals, selectedDate, syncState, onSave }) {
+  const [title, setTitle] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [options, setOptions] = useState({ date: "", time: "", priority: "Средний", goalId: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+  const savingRef = useRef(false);
+  const date = options.date || selectedDate;
+  const availableGoals = goals.filter((goal) => date >= goal.startDate && date <= goal.endDate);
+  const goalId = availableGoals.some((goal) => goal.id === options.goalId) ? options.goalId : "";
+
+  async function submit(event) {
+    event.preventDefault();
+    const clean = title.trim();
+    if (savingRef.current) return;
+    if (!clean) { setError("Введите название задачи."); inputRef.current?.focus(); return; }
+    savingRef.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({
+        id: createId(), title: clean, category: "Работа", date, time: options.time, deadline: "",
+        priority: options.priority, status: "К выполнению", notes: "", goalId: goalId || null,
+      });
+      setTitle("");
+      setOptions((current) => ({ ...current, time: "", goalId: "" }));
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+      inputRef.current?.focus();
+    }
+  }
+
+  const pendingSync = ["pending", "syncing"].includes(syncState);
+  return (
+    <form className="quick-add" onSubmit={submit}>
+      <div className="quick-add-row">
+        <input ref={inputRef} value={title} onChange={(event) => { setTitle(event.target.value); setError(""); }} maxLength="200" readOnly={saving} placeholder="Что нужно сделать?" aria-label="Быстрое добавление задачи" />
+        <button type="button" className="button button-quiet" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>Параметры</button>
+        <button type="submit" className="button button-primary" disabled={saving || !title.trim()}><Plus size={16} />{saving ? "Сохраняем…" : "Добавить"}</button>
+      </div>
+      {expanded && (
+        <div className="quick-add-options">
+          <label className="field"><span>Дата</span><input type="date" value={date} onChange={(event) => setOptions({ ...options, date: event.target.value })} required /></label>
+          <label className="field"><span>Время</span><input type="time" value={options.time} onChange={(event) => setOptions({ ...options, time: event.target.value })} /></label>
+          <label className="field"><span>Приоритет</span><select value={options.priority} onChange={(event) => setOptions({ ...options, priority: event.target.value })}>{PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
+          <label className="field"><span>Цель</span><select value={goalId} onChange={(event) => setOptions({ ...options, goalId: event.target.value })}><option value="">Без цели</option>{availableGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>
+        </div>
+      )}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {!error && pendingSync && <p className="workspace-hint" role="status">Синхронизируем с Supabase…</p>}
+    </form>
+  );
+}
+
+function TaskDialog({ task, defaults, goals, selectedDate, workspaceOptions, overviewLoading, userId, onClose, onSave }) {
   const [workspaceGoalsState, setWorkspaceGoals] = useState({ workspaceId: "", goals: [] });
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [formError, setFormError] = useState("");
@@ -398,8 +505,8 @@ function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoadi
   const [form, setForm] = useState(() => ({
     title: task?.title ?? "",
     category: task?.category ?? "Работа",
-    date: task?.date ?? selectedDate,
-    time: task?.time ?? "",
+    date: task?.date ?? defaults?.date ?? selectedDate,
+    time: task?.time ?? defaults?.time ?? "",
     deadline: task?.deadline ?? "",
     priority: task?.priority ?? "Средний",
     status: task?.status ?? "К выполнению",
@@ -408,6 +515,8 @@ function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoadi
     workspaceId: "",
     destinationChosen: Boolean(task),
   }));
+  const [repeat, setRepeat] = useState(() => recurrenceToForm(task?.recurrence));
+  const repeats = repeat.preset !== "none" && !form.workspaceId;
   const workspaceGoals = workspaceGoalsState.workspaceId === form.workspaceId ? workspaceGoalsState.goals : [];
   const goalOptions = form.workspaceId ? workspaceGoals : goals;
   const availableGoals = goalOptions.filter((goal) => form.date >= goal.startDate && form.date <= goal.endDate);
@@ -437,10 +546,23 @@ function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoadi
       return;
     }
     if (!form.title.trim() || !form.date) return;
+    const built = form.workspaceId ? { rule: null } : buildRecurrence(repeat, form.date, task?.recurrence);
+    if (built.error) {
+      setFormError(built.error);
+      return;
+    }
     setSaving(true);
     setFormError("");
     try {
-      await onSave({ ...task, ...form, title: form.title.trim(), goalId: form.goalId || null, id: task?.id ?? createId(), assigneeId: userId });
+      const payload = { ...task, ...form, title: form.title.trim(), goalId: form.goalId || null, id: task?.id ?? createId(), assigneeId: userId };
+      if (built.rule) {
+        payload.recurrence = built.rule;
+        payload.deadline = "";
+        payload.status = "К выполнению";
+      } else {
+        delete payload.recurrence;
+      }
+      await onSave(payload);
       onClose();
     } catch (error) {
       setFormError(getErrorMessage(error));
@@ -463,7 +585,7 @@ function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoadi
           <input autoFocus required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Что нужно сделать?" />
         </label>
         <label className="field">
-          <span>Дата</span>
+          <span>{repeats ? "Дата начала" : "Дата"}</span>
           <input required type="date" value={form.date} onChange={(event) => {
             const date = event.target.value;
             const keepsGoal = goalOptions.some((goal) => goal.id === form.goalId && date >= goal.startDate && date <= goal.endDate);
@@ -474,28 +596,72 @@ function TaskDialog({ task, goals, selectedDate, workspaceOptions, overviewLoadi
           <span>Время</span>
           <input type="time" value={form.time} onChange={(event) => setForm({ ...form, time: event.target.value })} />
         </label>
-        <label className="field">
+        {!repeats && <label className="field">
           <span>Срок выполнения</span>
           <input type="datetime-local" value={form.deadline} onChange={(event) => setForm({ ...form, deadline: event.target.value })} />
-        </label>
+        </label>}
         <label className="field">
           <span>Приоритет</span>
           <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}>
             {PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}
           </select>
         </label>
-        <label className="field">
+        {!repeats && <label className="field">
           <span>Статус</span>
           <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
             {STATUSES.map((status) => <option key={status}>{status}</option>)}
           </select>
-        </label>
+        </label>}
         <label className="field">
           <span>Категория</span>
           <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
             {CATEGORY_OPTIONS.map((category) => <option key={category}>{category}</option>)}
           </select>
         </label>
+        {!form.workspaceId && (
+          <fieldset className="recurrence-box field-wide">
+            <legend>Повторение</legend>
+            <label className="field">
+              <span>Как повторять</span>
+              <select value={repeat.preset} onChange={(event) => setRepeat({ ...repeat, preset: event.target.value })}>
+                <option value="none">Не повторяется</option>
+                <option value="daily">Каждый день</option>
+                <option value="weekdays">По дням недели</option>
+                <option value="weekly">Раз в неделю</option>
+                <option value="monthly">Раз в месяц</option>
+                <option value="custom">Свой интервал</option>
+              </select>
+            </label>
+            {repeat.preset !== "none" && <label className="field">
+              <span>Окончание · необязательно</span>
+              <input type="date" min={form.date} value={repeat.until} onChange={(event) => setRepeat({ ...repeat, until: event.target.value })} />
+            </label>}
+            {repeat.preset === "custom" && <>
+              <label className="field">
+                <span>Каждые</span>
+                <input type="number" min="1" max={MAX_INTERVAL} step="1" value={repeat.interval} onChange={(event) => setRepeat({ ...repeat, interval: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>Единица</span>
+                <select value={repeat.unit} onChange={(event) => setRepeat({ ...repeat, unit: event.target.value })}>
+                  <option value="day">дней</option>
+                  <option value="week">недель</option>
+                  <option value="month">месяцев</option>
+                </select>
+              </label>
+            </>}
+            {(repeat.preset === "weekdays" || (repeat.preset === "custom" && repeat.unit === "week")) && (
+              <div className="weekday-picker field-wide" role="group" aria-label="Дни недели">
+                {WEEKDAY_LABELS.map((label, index) => {
+                  const day = index + 1;
+                  const active = repeat.weekdays.includes(day);
+                  return <button key={day} type="button" className={active ? "weekday-chip active" : "weekday-chip"} aria-pressed={active} onClick={() => setRepeat({ ...repeat, weekdays: active ? repeat.weekdays.filter((item) => item !== day) : [...repeat.weekdays, day] })}>{label}</button>;
+                })}
+              </div>
+            )}
+            {repeats && <small className="field-wide">Выполнение отмечается для каждой даты отдельно. Правило действует с даты начала; изменение правила применяется ко всей серии.</small>}
+          </fieldset>
+        )}
         <label className="field field-wide">
           <span>Связанная цель · необязательно</span>
           <select disabled={workspaceLoading} value={availableGoals.some((goal) => goal.id === form.goalId) ? form.goalId : ""} onChange={(event) => setForm({ ...form, goalId: event.target.value })}>
@@ -582,12 +748,23 @@ function App() {
   const [search, setSearch] = useState("");
   const [goalDialog, setGoalDialog] = useState(undefined);
   const [taskDialog, setTaskDialog] = useState(undefined);
+  const [taskDefaults, setTaskDefaults] = useState(null);
+  const [taskLayout, setTaskLayout] = useState("table");
   const [taskShareDialog, setTaskShareDialog] = useState(null);
   const [activeSection, setActiveSection] = useState("dashboard");
   const [workspaceOverview, setWorkspaceOverview] = useState({ workspaces: [], invitations: [] });
   const [workspaceOverviewError, setWorkspaceOverviewError] = useState("");
   const [workspaceOverviewLoading, setWorkspaceOverviewLoading] = useState(false);
+  const [username, setUsername] = useState("");
+  const [profileOpen, setProfileOpen] = useState(false);
   const userId = user?.id;
+  useEffect(() => {
+    if (!userId || !supabase) return undefined;
+    let active = true;
+    setUsername("");
+    loadMyUsername().then((value) => { if (active) setUsername(value); });
+    return () => { active = false; };
+  }, [userId]);
   const refreshWorkspaceOverview = useCallback(async () => {
     if (!userId) return false;
     setWorkspaceOverviewLoading(true);
@@ -833,7 +1010,7 @@ function App() {
   const range = useMemo(() => getPeriodRange(selectedDate, view), [selectedDate, view]);
   const visibleTasks = useMemo(() => {
     const term = search.trim().toLocaleLowerCase("ru");
-    const matching = tasks.filter((task) => task.date >= range.start && task.date <= range.end && (!term || `${task.title} ${task.category} ${task.notes}`.toLocaleLowerCase("ru").includes(term)));
+    const matching = expandTasks(tasks, range.start, range.end).filter((task) => !term || `${task.title} ${task.category} ${task.notes}`.toLocaleLowerCase("ru").includes(term));
     return matching.sort((a, b) => {
       const direction = sort.direction === "asc" ? 1 : -1;
       let left;
@@ -1097,6 +1274,19 @@ function App() {
     ));
   }
 
+  function createTaskFromCalendar(date, time) {
+    setTaskDefaults({ date, time });
+    setTaskDialog(null);
+  }
+
+  async function moveTask(task, date, time) {
+    const current = tasks.find((item) => item.id === task.id);
+    if (!current || current.recurrence) throw new Error("Эту задачу нельзя перенести перетаскиванием.");
+    const moved = { ...current, date, time: time || current.time || "" };
+    if (moved.deadline && moved.deadline < date) moved.deadline = date;
+    await saveTask(moved);
+  }
+
   async function saveTask(task) {
     if (task.workspaceId) {
       await saveWorkspaceTask(userId, task.workspaceId, { ...task, createdBy: userId, assigneeId: userId });
@@ -1142,7 +1332,10 @@ function App() {
   }
 
   function deleteTask(task) {
-    if (!window.confirm(`Удалить задачу «${task.title}»?`)) return;
+    const message = task.recurrence
+      ? `Удалить всю серию «${task.title}» со всеми экземплярами? Чтобы убрать только будущие, используйте «Остановить повторение».`
+      : `Удалить задачу «${task.title}»?`;
+    if (!window.confirm(message)) return;
     updateDashboard((current) => ({ ...current, tasks: current.tasks.filter((item) => item.id !== task.id) }));
   }
 
@@ -1152,7 +1345,19 @@ function App() {
   }
 
   function toggleTask(task) {
-    saveTask({ ...task, status: task.status === "Выполнено" ? "К выполнению" : "Выполнено" });
+    const status = task.status === "Выполнено" ? "К выполнению" : "Выполнено";
+    if (!task.recurrence) {
+      saveTask({ ...task, status });
+      return;
+    }
+    const series = tasks.find((item) => item.id === task.id);
+    if (series) saveTask(setOccurrenceStatus(series, task.occurrenceDate, status));
+  }
+
+  function stopRecurrence(task) {
+    if (!window.confirm(`Остановить повторение «${task.title}» после ${task.occurrenceDate}? Прошлые и текущий экземпляры сохранятся, следующие исчезнут.`)) return;
+    const series = tasks.find((item) => item.id === task.id);
+    if (series) saveTask(stopRecurrenceAfter(series, task.occurrenceDate));
   }
 
   function changeSort(key) {
@@ -1224,7 +1429,9 @@ function App() {
           </a>
           <div className="topbar-actions">
             <span className="sync-indicator" data-state={syncState} title={syncError || syncLabel} role="status">{syncLabel}</span>
-            <span className="account-email" title={user.email}>{user.email}</span>
+            <button className="account-email account-button" type="button" onClick={() => setProfileOpen(true)} title="Открыть профиль и задать username" aria-label="Открыть профиль">
+              {username ? <><strong>@{username}</strong><small>{user.email}</small></> : <span>{user.email}</span>}
+            </button>
             <span className="today-label"><CalendarDays size={15} /> {todayLabel}</span>
             <button className="icon-button" type="button" onClick={signOut} disabled={authLoading} aria-label="Выйти из аккаунта" title="Выйти">
               <LogOut size={16} />
@@ -1309,7 +1516,7 @@ function App() {
                 const monthKey = localDateString(month).slice(0, 7);
                 const monthRange = getPeriodRange(localDateString(month), "month");
                 const monthGoals = goals.filter((goal) => goal.period === "month" && goal.startDate.slice(0, 7) === monthKey);
-                const monthTasks = tasks.filter((task) => task.date >= monthRange.start && task.date <= monthRange.end);
+                const monthTasks = expandTasks(tasks, monthRange.start, monthRange.end);
                 const done = monthTasks.filter((task) => task.status === "Выполнено").length;
                 return (
                   <button type="button" key={monthKey} className="month-card" onClick={() => chooseMonth(month)}>
@@ -1382,9 +1589,16 @@ function App() {
             <div><span className="section-kicker">План на выбранный период</span><h2>Задачи</h2></div>
             <div className="task-tools">
               <label className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти задачу" aria-label="Поиск задач" />{search && <button type="button" onClick={() => setSearch("")} aria-label="Очистить поиск"><X size={14} /></button>}</label>
-              <button type="button" className="button button-primary" onClick={() => setTaskDialog(null)}><Plus size={17} /> Новая задача</button>
+              <div className="view-switch" role="tablist" aria-label="Вид задач">
+                <button type="button" role="tab" aria-selected={taskLayout === "table"} className={taskLayout === "table" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("table")}>Таблица</button>
+                <button type="button" role="tab" aria-selected={taskLayout === "calendar"} className={taskLayout === "calendar" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("calendar")}>Календарь</button>
+              </div>
+              <button type="button" className="button button-primary" onClick={() => { setTaskDefaults(null); setTaskDialog(null); }}><Plus size={17} /> Новая задача</button>
             </div>
           </div>
+          <QuickAddTask goals={goals} selectedDate={selectedDate} syncState={syncState} onSave={saveTask} />
+          {taskLayout === "calendar" && <TaskCalendar tasks={tasks} selectedDate={selectedDate} onDateChange={setSelectedDate} onOpenTask={(task) => { setTaskDefaults(null); setTaskDialog(task.recurrence ? tasks.find((item) => item.id === task.id) ?? task : task); }} onCreateTask={createTaskFromCalendar} onMoveTask={moveTask} />}
+          {taskLayout === "table" && <>
           <div className="table-wrap">
             <table className="task-table">
               <thead><tr>
@@ -1399,14 +1613,14 @@ function App() {
                 {visibleTasks.map((task) => {
                   const linkedGoal = goals.find((goal) => goal.id === task.goalId);
                   return (
-                    <tr key={task.id} className={task.status === "Выполнено" ? "task-done" : ""}>
+                    <tr key={task.occurrenceDate ? `${task.id}:${task.occurrenceDate}` : task.id} className={task.status === "Выполнено" ? "task-done" : ""}>
                       <td className="check-col"><button type="button" className={`task-check${task.status === "Выполнено" ? " checked" : ""}`} aria-label={task.status === "Выполнено" ? `Снять отметку: ${task.title}` : `Отметить выполненной: ${task.title}`} onClick={() => toggleTask(task)}>{task.status === "Выполнено" && <Check size={13} />}</button></td>
-                      <td><div className="task-name">{task.title}</div><span className="task-category">{task.category}</span>{task.notes && <p className="table-note">{task.notes}</p>}</td>
+                      <td><div className="task-name">{task.title}</div><span className="task-category">{task.category}</span>{task.recurrence && <span className="recurrence-badge" title="Правило повторения"><Repeat size={11} />{describeRecurrence(task.recurrence, task.seriesStart ?? task.date)}</span>}{task.notes && <p className="table-note">{task.notes}</p>}</td>
                       <td><span className="task-date"><CalendarDays size={14} />{task.date}</span>{task.time && <span className="task-time"><Clock3 size={13} />{task.time}</span>}{task.deadline && <span className="task-deadline">Срок {task.deadline.replace("T", " ")}</span>}</td>
                       <td><span className={`priority-pill priority-${task.priority}`}>{task.priority}</span></td>
                       <td><span className={`status-pill status-${task.status === "Выполнено" ? "done" : task.status === "В процессе" ? "doing" : "todo"}`}><Circle size={7} fill="currentColor" />{task.status}</span></td>
                       <td><span className="linked-goal">{linkedGoal ? <><Target size={13} />{linkedGoal.title}</> : <span className="unlinked">Без связи</span>}</span></td>
-                      <td className="row-actions">{workspaceOverview.workspaces.length > 0 && <button className="icon-button" type="button" onClick={() => setTaskShareDialog(task)} title="Скопировать или перенести в пространство" aria-label={`Скопировать или перенести задачу ${task.title} в пространство`}><Share2 size={15} /></button>}<button className="icon-button" type="button" onClick={() => setTaskDialog(task)} title="Редактировать задачу" aria-label={`Редактировать задачу ${task.title}`}><ChevronDown size={16} /></button><button className="icon-button danger-hover" type="button" onClick={() => deleteTask(task)} title="Удалить задачу" aria-label={`Удалить задачу ${task.title}`}><Trash2 size={15} /></button></td>
+                      <td className="row-actions">{workspaceOverview.workspaces.length > 0 && !task.recurrence && <button className="icon-button" type="button" onClick={() => setTaskShareDialog(task)} title="Скопировать или перенести в пространство" aria-label={`Скопировать или перенести задачу ${task.title} в пространство`}><Share2 size={15} /></button>}{task.recurrence && (!task.recurrence.until || task.recurrence.until > task.occurrenceDate) && <button className="icon-button" type="button" onClick={() => stopRecurrence(task)} title="Остановить повторение после этой даты" aria-label={`Остановить повторение задачи ${task.title}`}><Repeat size={15} /></button>}<button className="icon-button" type="button" onClick={() => setTaskDialog(task.recurrence ? tasks.find((item) => item.id === task.id) ?? task : task)} title="Редактировать задачу" aria-label={`Редактировать задачу ${task.title}`}><ChevronDown size={16} /></button><button className="icon-button danger-hover" type="button" onClick={() => deleteTask(task)} title="Удалить задачу" aria-label={`Удалить задачу ${task.title}`}><Trash2 size={15} /></button></td>
                     </tr>
                   );
                 })}
@@ -1415,15 +1629,17 @@ function App() {
             {!visibleTasks.length && <div className="table-empty"><span className="empty-icon"><ListTodo size={20} /></span><strong>{search ? "Ничего не найдено" : "Задач пока нет"}</strong><span>{search ? "Попробуйте изменить запрос." : "Добавьте первую задачу для этого периода."}</span>{!search && <button type="button" className="button button-secondary" onClick={() => setTaskDialog(null)}><Plus size={16} /> Добавить задачу</button>}</div>}
           </div>
           <footer className="table-footer"><span>{visibleTasks.length} задач · сортировка по нажатию на заголовок столбца</span><span><ArrowDown size={14} /> {syncLabel}</span></footer>
-        </section>
+                   </>}
+                 </section>
 
         <footer className="app-footer"><span><Sparkles size={14} /> Данные синхронизируются между вашими устройствами</span><button type="button" onClick={() => { if (!window.confirm("Удалить все цели и задачи? Это действие нельзя отменить.")) return; updateDashboard(EMPTY_DASHBOARD); }}>Очистить все данные</button></footer>
         </>
         )}
       </div>
 
+      {profileOpen && <ProfileDialog email={user.email} username={username} onClose={() => setProfileOpen(false)} onSaved={setUsername} />}
       {goalDialog !== undefined && <GoalDialog key={goalDialog?.id ?? "new-goal"} goal={goalDialog} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} onClose={() => setGoalDialog(undefined)} onSave={saveGoal} />}
-      {taskDialog !== undefined && <TaskDialog key={taskDialog?.id ?? "new-task"} task={taskDialog} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} userId={user.id} onClose={() => setTaskDialog(undefined)} onSave={saveTask} />}
+      {taskDialog !== undefined && <TaskDialog key={taskDialog?.id ?? "new-task"} task={taskDialog} defaults={taskDefaults} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} userId={user.id} onClose={() => { setTaskDialog(undefined); setTaskDefaults(null); }} onSave={saveTask} />}
       {taskShareDialog && <TaskShareDialog key={taskShareDialog.id} task={taskShareDialog} workspaceOptions={workspaceOverview.workspaces} onClose={() => setTaskShareDialog(null)} onShare={sharePersonalTask} />}
     </main>
   );
