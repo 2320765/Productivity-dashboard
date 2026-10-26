@@ -52,7 +52,13 @@ export function normalizeRecurrence(rule) {
       if (DATE_PATTERN.test(date) && typeof status === "string") overrides[date] = status;
     }
   }
-  return { unit: rule.unit, interval, weekdays, until, overrides };
+  const moves = {};
+  if (rule.moves && typeof rule.moves === "object") {
+    for (const [from, to] of Object.entries(rule.moves)) {
+      if (DATE_PATTERN.test(from) && typeof to === "string" && DATE_PATTERN.test(to) && to !== from) moves[from] = to;
+    }
+  }
+  return { unit: rule.unit, interval, weekdays, until, overrides, moves };
 }
 
 export function occursOn(rule, startDate, date) {
@@ -80,19 +86,34 @@ export function expandTask(task, rangeStart, rangeEnd) {
   const from = task.date > rangeStart ? task.date : rangeStart;
   const to = rule.until && rule.until < rangeEnd ? rule.until : rangeEnd;
   const instances = [];
+  const build = (occurrence, date) => ({
+    ...task,
+    recurrence: rule,
+    date,
+    deadline: "",
+    status: rule.overrides[occurrence] ?? DEFAULT_STATUS,
+    occurrenceDate: occurrence,
+    seriesStart: task.date,
+  });
   for (let day = from; day <= to; day = addDays(day, 1)) {
-    if (!occursOn(rule, task.date, day)) continue;
-    instances.push({
-      ...task,
-      recurrence: rule,
-      date: day,
-      deadline: "",
-      status: rule.overrides[day] ?? DEFAULT_STATUS,
-      occurrenceDate: day,
-      seriesStart: task.date,
-    });
+    if (rule.moves[day] || !occursOn(rule, task.date, day)) continue;
+    instances.push(build(day, day));
+  }
+  // Перенесённый экземпляр показывается на новой дате, а на исходной исчезает.
+  for (const [occurrence, date] of Object.entries(rule.moves)) {
+    if (date >= rangeStart && date <= rangeEnd && occursOn(rule, task.date, occurrence)) instances.push(build(occurrence, date));
   }
   return instances;
+}
+
+// Переносит один экземпляр серии на другую дату; правило и остальные экземпляры не меняются.
+export function moveOccurrence(task, occurrenceDate, newDate) {
+  const rule = normalizeRecurrence(task.recurrence);
+  if (!rule) return { ...task, date: newDate };
+  const moves = { ...rule.moves };
+  if (newDate === occurrenceDate) delete moves[occurrenceDate];
+  else moves[occurrenceDate] = newDate;
+  return { ...task, recurrence: { ...rule, moves } };
 }
 
 export function expandTasks(tasks, rangeStart, rangeEnd) {
@@ -173,6 +194,9 @@ export function buildRecurrence(form, startDate, previousRule) {
   const previous = normalizeRecurrence(previousRule);
   for (const [date, status] of Object.entries(previous?.overrides ?? {})) {
     if (occursOn(rule, startDate, date)) rule.overrides[date] = status;
+  }
+  for (const [from, to] of Object.entries(previous?.moves ?? {})) {
+    if (occursOn(rule, startDate, from)) rule.moves[from] = to;
   }
   return { rule };
 }

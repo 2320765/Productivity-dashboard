@@ -3,7 +3,6 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
-  ArrowUpDown,
   CalendarDays,
   Check,
   CheckCheck,
@@ -16,6 +15,7 @@ import {
   Plus,
   Repeat,
   Search,
+  Settings,
   Share2,
   Sparkles,
   Sun,
@@ -55,6 +55,14 @@ import {
 import Workspaces from "./Workspaces.jsx";
 import Friends from "./Friends.jsx";
 import TaskCalendar from "./Calendar.jsx";
+import OverdueTasks from "./Overdue.jsx";
+import AnalyticsOverview from "./AnalyticsOverview.jsx";
+import ReminderCenter from "./ReminderCenter.jsx";
+import { getReminderTarget, normalizeReminder, REMINDER_LEADS } from "./reminders.js";
+import { applyChanges, getOverdueTasks, revertChanges } from "./reschedule.js";
+import {
+  activeFilterLabels, EMPTY_TASK_FILTERS, filterTasks, getTaskSearchRows, sortIndicator, sortTasks,
+} from "./taskFilters.js";
 import { getErrorMessage } from "./errorMessage.js";
 import { normalizeUsername, validateUsername } from "./username.js";
 import {
@@ -72,7 +80,6 @@ const VIEW_OPTIONS = [
 ];
 const PERIOD_LABELS = { year: "Год", month: "Месяц", week: "Неделя", day: "День" };
 const CATEGORY_OPTIONS = ["Работа", "Личное", "Учёба", "Здоровье"];
-const PRIORITY_ORDER = { Высокий: 0, Средний: 1, Низкий: 2 };
 const EMPTY_DASHBOARD = { goals: [], tasks: [] };
 
 function hasDashboardData(dashboard) {
@@ -98,12 +105,15 @@ function AuthScreen({
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [notice, setNotice] = useState("");
+  const usernameError = mode === "signup" ? validateUsername(username) : "";
 
   async function submit(event) {
     event.preventDefault();
     setNotice("");
-    await onSubmit(mode, email.trim(), password, setNotice);
+    if (mode === "signup" && usernameError) return;
+    await onSubmit(mode, email.trim(), password, normalizeUsername(username), setNotice);
   }
 
   return (
@@ -130,6 +140,11 @@ function AuthScreen({
               <span>Электронная почта</span>
               <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
             </label>
+            {mode === "signup" && <label className="field">
+              <span>Username</span>
+              <input autoComplete="username" autoCapitalize="none" spellCheck="false" required minLength="3" maxLength="20" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="например, anna_lee" />
+              <small className={usernameError ? "form-error" : "workspace-hint"}>{usernameError || "Уникальное имя: латинские буквы, цифры и _, от 3 до 20 символов."}</small>
+            </label>}
             <label className="field">
               <span>Пароль</span>
               <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength="6" required value={password} onChange={(event) => setPassword(event.target.value)} />
@@ -250,7 +265,7 @@ function Modal({ title, subtitle, onClose, children }) {
   );
 }
 
-function ProfileDialog({ email, username, onClose, onSaved }) {
+function SettingsDialog({ username, onClose, onSaved }) {
   const [value, setValue] = useState(username);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -273,14 +288,13 @@ function ProfileDialog({ email, username, onClose, onSaved }) {
   }
 
   return (
-    <Modal title="Профиль" subtitle="Username уникален: по нему вас находят друзья и приглашают в пространства. Email другим пользователям не показывается." onClose={onClose}>
+    <Modal title="Настройки" subtitle="Здесь будут собраны настройки аккаунта. Сейчас доступна настройка username." onClose={onClose}>
       <form className="dialog-form" onSubmit={submit}>
-        <label className="field field-wide"><span>Email</span><input value={email} readOnly disabled /></label>
         <label className="field field-wide">
-          <span>Username</span>
-          <input value={value} onChange={(event) => { setValue(event.target.value); setError(""); }} maxLength="21" autoComplete="off" autoCapitalize="none" spellCheck="false" placeholder="например, anna_lee" required />
+          <span>Имя пользователя (username)</span>
+          <input autoFocus value={value} onChange={(event) => { setValue(event.target.value); setError(""); }} maxLength="20" autoComplete="username" autoCapitalize="none" spellCheck="false" placeholder="например, anna_lee" required />
         </label>
-        <small className={formatError || error ? "form-error field-wide" : "workspace-hint field-wide"} role={error ? "alert" : undefined}>{error || formatError || "3–20 символов: латинские буквы, цифры и _, начинается с буквы."}</small>
+        <small className={formatError || error ? "form-error field-wide" : "workspace-hint field-wide"} role={error ? "alert" : undefined}>{error || formatError || "Username уникален: по нему вас находят друзья и приглашают в пространства. 3–20 символов: латинские буквы, цифры и _, начинается с буквы."}</small>
         <div className="dialog-actions field-wide">
           <button className="button button-secondary" type="button" onClick={onClose}>Отмена</button>
           <button className="button button-primary" type="submit" disabled={saving || Boolean(formatError) || !value.trim() || normalizeUsername(value) === username}>{saving ? "Сохраняем…" : "Сохранить"}</button>
@@ -515,6 +529,7 @@ function TaskDialog({ task, defaults, goals, selectedDate, workspaceOptions, ove
     workspaceId: "",
     destinationChosen: Boolean(task),
   }));
+  const [reminder, setReminder] = useState(() => normalizeReminder(task?.reminder));
   const [repeat, setRepeat] = useState(() => recurrenceToForm(task?.recurrence));
   const repeats = repeat.preset !== "none" && !form.workspaceId;
   const workspaceGoals = workspaceGoalsState.workspaceId === form.workspaceId ? workspaceGoalsState.goals : [];
@@ -551,10 +566,17 @@ function TaskDialog({ task, defaults, goals, selectedDate, workspaceOptions, ove
       setFormError(built.error);
       return;
     }
+    const reminderValue = form.workspaceId ? { mode: "none" } : normalizeReminder(reminder);
+    if (reminderValue.mode !== "none" && !getReminderTarget({ ...form, status: built.rule ? "К выполнению" : form.status, reminder: reminderValue })) {
+      setFormError("Для напоминания укажите дедлайн со временем или время задачи.");
+      return;
+    }
     setSaving(true);
     setFormError("");
     try {
       const payload = { ...task, ...form, title: form.title.trim(), goalId: form.goalId || null, id: task?.id ?? createId(), assigneeId: userId };
+      if (form.workspaceId) delete payload.reminder;
+      else payload.reminder = reminderValue;
       if (built.rule) {
         payload.recurrence = built.rule;
         payload.deadline = "";
@@ -600,6 +622,27 @@ function TaskDialog({ task, defaults, goals, selectedDate, workspaceOptions, ove
           <span>Срок выполнения</span>
           <input type="datetime-local" value={form.deadline} onChange={(event) => setForm({ ...form, deadline: event.target.value })} />
         </label>}
+        <label className="field field-wide">
+          <span>Напоминание</span>
+          <select
+            value={form.workspaceId ? "none" : reminder.mode === "before" ? `before:${reminder.minutes}` : reminder.mode}
+            disabled={Boolean(form.workspaceId)}
+            onChange={(event) => {
+              const [mode, rawMinutes] = event.target.value.split(":");
+              setReminder(mode === "before" ? { mode, minutes: Number(rawMinutes) } : { mode, minutes: 0 });
+            }}
+          >
+            <option value="none">Без напоминания</option>
+            {!form.workspaceId && <><option value="at">В назначенное время</option>{REMINDER_LEADS.filter((item) => item.value > 0).map((item) => <option key={item.value} value={`before:${item.value}`}>{item.label} срока</option>)}</>}
+          </select>
+          <small>{form.workspaceId
+            ? "Напоминания настраиваются для личных задач."
+            : reminder.mode === "none"
+              ? "Уведомления появятся, пока сайт открыт, если включить их в панели «Напоминания»."
+              : getReminderTarget({ ...form, status: form.status, reminder })
+                ? "Время берётся из дедлайна, а если его нет — из даты и времени задачи."
+                : "Укажите дедлайн со временем или время задачи, чтобы напоминание сработало."}</small>
+        </label>
         <label className="field">
           <span>Приоритет</span>
           <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}>
@@ -746,6 +789,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(localDateString());
   const [sort, setSort] = useState({ key: "date", direction: "asc" });
   const [search, setSearch] = useState("");
+  const [taskFilters, setTaskFilters] = useState(EMPTY_TASK_FILTERS);
   const [goalDialog, setGoalDialog] = useState(undefined);
   const [taskDialog, setTaskDialog] = useState(undefined);
   const [taskDefaults, setTaskDefaults] = useState(null);
@@ -756,15 +800,17 @@ function App() {
   const [workspaceOverviewError, setWorkspaceOverviewError] = useState("");
   const [workspaceOverviewLoading, setWorkspaceOverviewLoading] = useState(false);
   const [username, setUsername] = useState("");
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const userId = user?.id;
   useEffect(() => {
     if (!userId || !supabase) return undefined;
     let active = true;
     setUsername("");
-    loadMyUsername().then((value) => { if (active) setUsername(value); });
+    loadMyUsername().then((value) => {
+      if (active) setUsername(value || normalizeUsername(user?.user_metadata?.username));
+    });
     return () => { active = false; };
-  }, [userId]);
+  }, [user, userId]);
   const refreshWorkspaceOverview = useCallback(async () => {
     if (!userId) return false;
     setWorkspaceOverviewLoading(true);
@@ -1008,33 +1054,20 @@ function App() {
 
   const { goals, tasks } = dashboard;
   const range = useMemo(() => getPeriodRange(selectedDate, view), [selectedDate, view]);
-  const visibleTasks = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("ru");
-    const matching = expandTasks(tasks, range.start, range.end).filter((task) => !term || `${task.title} ${task.category} ${task.notes}`.toLocaleLowerCase("ru").includes(term));
-    return matching.sort((a, b) => {
-      const direction = sort.direction === "asc" ? 1 : -1;
-      let left;
-      let right;
-      if (sort.key === "priority") {
-        left = PRIORITY_ORDER[a.priority] ?? 1;
-        right = PRIORITY_ORDER[b.priority] ?? 1;
-        return (left - right) * direction;
-      }
-      if (sort.key === "status") {
-        left = STATUSES.indexOf(a.status);
-        right = STATUSES.indexOf(b.status);
-        return (left - right) * direction;
-      }
-      if (sort.key === "title") {
-        left = a.title;
-        right = b.title;
-      } else {
-        left = `${a.date} ${a.time}`;
-        right = `${b.date} ${b.time}`;
-      }
-      return String(left).localeCompare(String(right), "ru") * direction;
-    });
-  }, [range.end, range.start, search, sort, tasks]);
+  const filterSourceTasks = useMemo(
+    () => getTaskSearchRows(tasks, range, taskFilters.dateScope, localDateString()),
+    [range, taskFilters.dateScope, tasks],
+  );
+  const visibleTasks = useMemo(
+    () => sortTasks(filterTasks(filterSourceTasks, taskFilters, goals, localDateString(), search), sort),
+    [filterSourceTasks, goals, search, sort, taskFilters],
+  );
+  const unfilteredTaskCount = useMemo(() => filterSourceTasks.length, [filterSourceTasks]);
+  const filterLabels = useMemo(() => {
+    const labels = activeFilterLabels(taskFilters, goals);
+    if (search.trim()) labels.push({ key: "search", text: `Поиск: ${search.trim()}` });
+    return labels;
+  }, [goals, search, taskFilters]);
 
   const visibleGoals = useMemo(() => {
     const selected = new Set(
@@ -1058,6 +1091,7 @@ function App() {
   }, [goals, range.end, range.start, view]);
 
   const completedCount = visibleTasks.filter((task) => task.status === "Выполнено").length;
+  const overdueCount = useMemo(() => getOverdueTasks(tasks, localDateString()).length, [tasks]);
   const progress = visibleTasks.length ? Math.round((completedCount / visibleTasks.length) * 100) : 0;
   const yearMonths = useMemo(
     () => Array.from({ length: 12 }, (_, index) => new Date(Number(selectedDate.slice(0, 4)), index, 1, 12)),
@@ -1085,6 +1119,10 @@ function App() {
       return undefined;
     }
     if (!dirtyRef.current) return undefined;
+    if (remoteConflict) {
+      setSyncState("conflict");
+      return undefined;
+    }
     if (!localSaved) setSyncState("local-error");
     else setSyncState(navigator.onLine ? "pending" : "offline");
 
@@ -1142,7 +1180,7 @@ function App() {
     }, 700);
 
     return () => window.clearTimeout(timer);
-  }, [dashboard, initializedUserId, syncTrigger, userId]);
+  }, [dashboard, initializedUserId, remoteConflict, syncTrigger, userId]);
 
   useEffect(() => {
     try {
@@ -1152,15 +1190,21 @@ function App() {
     }
   }, [theme]);
 
-  async function submitAuth(mode, email, password, setNotice) {
+  async function submitAuth(mode, email, password, usernameValue, setNotice) {
     if (!supabase) return;
     setAuthLoading(true);
     setAuthError("");
     try {
       if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const usernameError = validateUsername(usernameValue);
+        if (usernameError) throw new Error(usernameError);
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { username: normalizeUsername(usernameValue) } },
+        });
         if (error) throw error;
-        if (!data.session) setNotice("Аккаунт создан. Проверьте почту и подтвердите адрес, затем войдите.");
+        if (!data.session) setNotice(`Аккаунт и username @${normalizeUsername(usernameValue)} созданы. Проверьте почту и подтвердите адрес, затем войдите.`);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -1285,6 +1329,14 @@ function App() {
     const moved = { ...current, date, time: time || current.time || "" };
     if (moved.deadline && moved.deadline < date) moved.deadline = date;
     await saveTask(moved);
+  }
+
+  function applyReschedule(changes) {
+    updateDashboard((current) => ({ ...current, tasks: applyChanges(current.tasks, changes) }));
+  }
+
+  function undoReschedule(changes) {
+    updateDashboard((current) => ({ ...current, tasks: revertChanges(current.tasks, changes) }));
   }
 
   async function saveTask(task) {
@@ -1429,9 +1481,11 @@ function App() {
           </a>
           <div className="topbar-actions">
             <span className="sync-indicator" data-state={syncState} title={syncError || syncLabel} role="status">{syncLabel}</span>
-            <button className="account-email account-button" type="button" onClick={() => setProfileOpen(true)} title="Открыть профиль и задать username" aria-label="Открыть профиль">
-              {username ? <><strong>@{username}</strong><small>{user.email}</small></> : <span>{user.email}</span>}
-            </button>
+            <span className="account-email account-name">
+              <strong>{username ? `@${username}` : "Пользователь"}</strong>
+              <small>{user.email}</small>
+            </span>
+            <button className="icon-button settings-button" type="button" onClick={() => setSettingsOpen(true)} aria-label="Настройки" title="Настройки"><Settings size={17} /></button>
             <span className="today-label"><CalendarDays size={15} /> {todayLabel}</span>
             <button className="icon-button" type="button" onClick={signOut} disabled={authLoading} aria-label="Выйти из аккаунта" title="Выйти">
               <LogOut size={16} />
@@ -1546,6 +1600,9 @@ function App() {
           </article>
         </section>
 
+        <ReminderCenter key={userId ?? "guest"} tasks={tasks} userId={userId} />
+        <AnalyticsOverview tasks={tasks} goals={goals} selectedDate={selectedDate} today={localDateString()} />
+
         <section className="panel goals-panel">
           <div className="section-heading">
             <div><span className="section-kicker">Большое складывается из малого</span><h2>Цели</h2></div>
@@ -1592,21 +1649,48 @@ function App() {
               <div className="view-switch" role="tablist" aria-label="Вид задач">
                 <button type="button" role="tab" aria-selected={taskLayout === "table"} className={taskLayout === "table" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("table")}>Таблица</button>
                 <button type="button" role="tab" aria-selected={taskLayout === "calendar"} className={taskLayout === "calendar" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("calendar")}>Календарь</button>
+                <button type="button" role="tab" aria-selected={taskLayout === "overdue"} className={taskLayout === "overdue" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("overdue")}>Просрочено{overdueCount > 0 && <span className="overdue-count">{overdueCount}</span>}</button>
               </div>
               <button type="button" className="button button-primary" onClick={() => { setTaskDefaults(null); setTaskDialog(null); }}><Plus size={17} /> Новая задача</button>
             </div>
           </div>
           <QuickAddTask goals={goals} selectedDate={selectedDate} syncState={syncState} onSave={saveTask} />
           {taskLayout === "calendar" && <TaskCalendar tasks={tasks} selectedDate={selectedDate} onDateChange={setSelectedDate} onOpenTask={(task) => { setTaskDefaults(null); setTaskDialog(task.recurrence ? tasks.find((item) => item.id === task.id) ?? task : task); }} onCreateTask={createTaskFromCalendar} onMoveTask={moveTask} />}
+          {taskLayout === "overdue" && <OverdueTasks tasks={tasks} goals={goals} today={localDateString()} onApply={applyReschedule} onUndo={undoReschedule} />}
           {taskLayout === "table" && <>
+          <div className="task-filter-panel" aria-label="Фильтры задач">
+            <label><span>Статус</span><select value={taskFilters.status} onChange={(event) => setTaskFilters({ ...taskFilters, status: event.target.value })}>
+              <option value="all">Все</option><option value="active">Активные</option><option value="completed">Выполненные</option><option value="overdue">Просроченные</option>
+            </select></label>
+            <label><span>Приоритет</span><select value={taskFilters.priority} onChange={(event) => setTaskFilters({ ...taskFilters, priority: event.target.value })}>
+              <option value="all">Любой</option>{PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+            </select></label>
+            <label><span>Цель</span><select value={taskFilters.goalId} onChange={(event) => setTaskFilters({ ...taskFilters, goalId: event.target.value })}>
+              <option value="all">Любая</option><option value="none">Без цели</option>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}
+            </select></label>
+            <label><span>Срок</span><select value={taskFilters.deadline} onChange={(event) => setTaskFilters({ ...taskFilters, deadline: event.target.value })}>
+              <option value="all">Любой</option><option value="with">Есть срок</option><option value="without">Без срока</option>
+            </select></label>
+            <label><span>Даты</span><select value={taskFilters.dateScope} onChange={(event) => setTaskFilters({ ...taskFilters, dateScope: event.target.value })}>
+              <option value="period">Текущий период</option><option value="all">Все даты</option>
+            </select></label>
+          </div>
+          {filterLabels.length > 0 && <div className="active-filters" aria-label="Активные фильтры">
+            <span>Применено:</span>
+            {filterLabels.map(({ key, text }) => <span className="filter-chip" key={key}>{text}<button type="button" aria-label={`Убрать фильтр ${text}`} onClick={() => {
+              if (key === "search") setSearch("");
+              else setTaskFilters({ ...taskFilters, [key]: EMPTY_TASK_FILTERS[key] });
+            }}><X size={11} /></button></span>)}
+            <button type="button" className="filter-reset" onClick={() => { setTaskFilters(EMPTY_TASK_FILTERS); setSearch(""); }}>Сбросить всё</button>
+          </div>}
           <div className="table-wrap">
             <table className="task-table">
               <thead><tr>
                 <th className="check-col"><span className="sr-only">Выполнение</span></th>
-                <th><button type="button" onClick={() => changeSort("title")}>Задача <ArrowUpDown size={13} /></button></th>
-                <th><button type="button" onClick={() => changeSort("date")}>Дата и время <ArrowUpDown size={13} /></button></th>
-                <th><button type="button" onClick={() => changeSort("priority")}>Приоритет <ArrowUpDown size={13} /></button></th>
-                <th><button type="button" onClick={() => changeSort("status")}>Статус <ArrowUpDown size={13} /></button></th>
+                <th aria-sort={sort.key === "title" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort("title")}>Задача <span className="sort-indicator" aria-hidden="true">{sortIndicator(sort, "title")}</span></button></th>
+                <th aria-sort={sort.key === "date" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort("date")}>Дата и время <span className="sort-indicator" aria-hidden="true">{sortIndicator(sort, "date")}</span></button></th>
+                <th aria-sort={sort.key === "priority" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort("priority")}>Приоритет <span className="sort-indicator" aria-hidden="true">{sortIndicator(sort, "priority")}</span></button></th>
+                <th aria-sort={sort.key === "status" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort("status")}>Статус <span className="sort-indicator" aria-hidden="true">{sortIndicator(sort, "status")}</span></button></th>
                 <th>Цель / заметки</th><th className="actions-col"><span className="sr-only">Действия</span></th>
               </tr></thead>
               <tbody>
@@ -1626,7 +1710,7 @@ function App() {
                 })}
               </tbody>
             </table>
-            {!visibleTasks.length && <div className="table-empty"><span className="empty-icon"><ListTodo size={20} /></span><strong>{search ? "Ничего не найдено" : "Задач пока нет"}</strong><span>{search ? "Попробуйте изменить запрос." : "Добавьте первую задачу для этого периода."}</span>{!search && <button type="button" className="button button-secondary" onClick={() => setTaskDialog(null)}><Plus size={16} /> Добавить задачу</button>}</div>}
+            {!visibleTasks.length && <div className="table-empty"><span className="empty-icon"><ListTodo size={20} /></span><strong>{unfilteredTaskCount === 0 ? (taskFilters.dateScope === "all" || taskFilters.status === "overdue" ? "Задач пока нет" : "На этот период задач нет") : "Ничего не найдено"}</strong><span>{unfilteredTaskCount === 0 ? (taskFilters.dateScope === "all" || taskFilters.status === "overdue" ? "Добавьте задачу, и она появится здесь." : "Попробуйте выбрать другой период или добавьте задачу.") : "Измените фильтры или поисковый запрос."}</span>{unfilteredTaskCount === 0 && <button type="button" className="button button-secondary" onClick={() => setTaskDialog(null)}><Plus size={16} /> Добавить задачу</button>}{unfilteredTaskCount > 0 && <button type="button" className="button button-secondary" onClick={() => { setTaskFilters(EMPTY_TASK_FILTERS); setSearch(""); }}>Сбросить фильтры</button>}</div>}
           </div>
           <footer className="table-footer"><span>{visibleTasks.length} задач · сортировка по нажатию на заголовок столбца</span><span><ArrowDown size={14} /> {syncLabel}</span></footer>
                    </>}
@@ -1637,7 +1721,7 @@ function App() {
         )}
       </div>
 
-      {profileOpen && <ProfileDialog email={user.email} username={username} onClose={() => setProfileOpen(false)} onSaved={setUsername} />}
+      {settingsOpen && <SettingsDialog username={username} onClose={() => setSettingsOpen(false)} onSaved={setUsername} />}
       {goalDialog !== undefined && <GoalDialog key={goalDialog?.id ?? "new-goal"} goal={goalDialog} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} onClose={() => setGoalDialog(undefined)} onSave={saveGoal} />}
       {taskDialog !== undefined && <TaskDialog key={taskDialog?.id ?? "new-task"} task={taskDialog} defaults={taskDefaults} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} userId={user.id} onClose={() => { setTaskDialog(undefined); setTaskDefaults(null); }} onSave={saveTask} />}
       {taskShareDialog && <TaskShareDialog key={taskShareDialog.id} task={taskShareDialog} workspaceOptions={workspaceOverview.workspaces} onClose={() => setTaskShareDialog(null)} onShare={sharePersonalTask} />}

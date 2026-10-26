@@ -84,6 +84,8 @@ function mapTask(row) {
     notes: row.notes,
     goalId: row.goal_id,
     ...(row.recurrence ? { recurrence: row.recurrence } : {}),
+    ...(row.reminder ? { reminder: row.reminder } : {}),
+    ...(row.move_count ? { movedFrom: row.moved_from, movedAt: row.moved_at, moveCount: row.move_count } : {}),
   };
 }
 
@@ -144,6 +146,10 @@ export async function syncRemoteDashboard(userId, rawDashboard, expectedRevision
       notes: task.notes ?? "",
       goal_id: task.goalId ?? null,
       recurrence: task.recurrence ?? null,
+      reminder: task.reminder ?? null,
+      moved_from: task.movedFrom ?? null,
+      moved_at: task.movedAt ?? null,
+      move_count: task.moveCount ?? 0,
     })),
     p_expected_revision: expectedRevision,
   });

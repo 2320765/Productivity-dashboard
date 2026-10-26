@@ -330,6 +330,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .account-button:hover, .account-button:focus-visible { background: var(--surface-soft, rgba(127, 127, 127, .12)); }
 .account-button strong { max-width: 100%; overflow: hidden; color: var(--text, inherit); font-size: 11px; text-overflow: ellipsis; }
 .account-button small { max-width: 100%; overflow: hidden; font-size: 9px; text-overflow: ellipsis; }
+.account-name { display: inline-flex; flex-direction: column; max-width: 150px; min-width: 0; line-height: 1.3; }
+.account-name strong, .account-name small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-name strong { color: var(--text); font-size: 11px; }
+.account-name small { color: var(--muted); font-size: 9px; }
 .username-tag { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 500; }
 .form-error { color: var(--rose); font-size: 11px; line-height: 1.5; }
 .quick-add { display: grid; gap: 8px; margin: 0 0 14px; }
@@ -538,3 +542,93 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     .cal-cell { min-height: 56px; }
     .cal-month .cal-task b { display: none; }
   }
+/* Overdue */
+.overdue { display: grid; gap: 10px; }
+.overdue-count { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--rose); color: #fff; font-size: 11px; }
+.overdue-bulk { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.overdue-all { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.overdue-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.overdue-actions input[type="date"] { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--surface); font: inherit; }
+.overdue-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.overdue-row { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--rose); border-radius: 10px; background: var(--surface); }
+.overdue-info { display: grid; gap: 2px; min-width: 0; }
+.overdue-info small { color: var(--muted); }
+.overdue-result, .overdue-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+@media (max-width: 760px) {
+  .overdue-row { grid-template-columns: auto 1fr; }
+  .overdue-row .overdue-actions { grid-column: 1 / -1; }
+}
+
+/* Task filters */
+.task-filter-panel { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.task-filter-panel label { display: grid; gap: 4px; min-width: 115px; color: var(--muted); font-size: 11px; }
+.task-filter-panel select { min-height: 34px; padding: 6px 26px 6px 9px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface); font-size: 12px; }
+.active-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+.filter-chip { display: inline-flex; gap: 5px; align-items: center; padding: 3px 7px; border-radius: 999px; color: var(--purple-dark); background: var(--purple-soft); }
+.filter-chip button { display: inline-flex; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; }
+.filter-reset { padding: 3px 6px; border: 0; color: var(--purple-dark); background: transparent; font-size: 12px; cursor: pointer; }
+.sort-indicator { display: inline-block; min-width: 13px; font-size: 14px; font-weight: 700; }
+@media (max-width: 760px) {
+  .task-filter-panel label { flex: 1 1 130px; }
+}
+
+/* Progress analytics */
+.analytics-panel { display: grid; gap: 14px; }
+.analytics-heading { margin-bottom: 0; }
+.analytics-period { margin-top: -9px; color: var(--muted); font-size: 12px; text-transform: capitalize; }
+.analytics-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.analytics-metric { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.analytics-metric-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--purple); background: var(--purple-soft); }
+.analytics-green { color: var(--green); background: var(--green-soft); }
+.analytics-amber { color: var(--amber); background: var(--amber-soft); }
+.analytics-purple { color: var(--purple); background: var(--purple-soft); }
+.analytics-metric > div, .analytics-goals > span:nth-child(2) { display: grid; gap: 2px; min-width: 0; }
+.analytics-metric small, .analytics-goals small { color: var(--muted); font-size: 11px; }
+.analytics-metric strong, .analytics-goals strong { font-size: 18px; line-height: 1.2; }
+.analytics-metric strong em { color: var(--muted); font-size: 12px; font-style: normal; font-weight: 500; }
+.analytics-progress { display: grid; gap: 6px; }
+.analytics-progress-copy { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.analytics-progress-copy strong { color: var(--purple); }
+.analytics-progress-track { height: 7px; overflow: hidden; border-radius: 999px; background: var(--border); }
+.analytics-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--purple), #a48cf4); transition: width .25s ease; }
+.analytics-chart { min-height: 115px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; align-items: stretch; padding: 6px 2px 0; border-bottom: 1px solid var(--border); }
+.analytics-day { min-width: 0; display: grid; grid-template-rows: 14px 1fr 17px; justify-items: center; gap: 3px; }
+.analytics-day-count, .analytics-day-label { color: var(--muted); font-size: 10px; line-height: 14px; }
+.analytics-day-label { text-transform: lowercase; }
+.analytics-bar-track { width: min(24px, 70%); height: 100%; display: flex; align-items: end; overflow: hidden; border-radius: 5px 5px 0 0; background: transparent; }
+.analytics-bar { position: relative; display: block; width: 100%; min-height: 2px; border-radius: 5px 5px 0 0; background: var(--purple-soft); }
+.analytics-bar-done { position: absolute; left: 0; right: 0; bottom: 0; display: block; border-radius: 5px 5px 0 0; background: var(--purple); }
+.analytics-chart-month { min-height: 92px; grid-auto-columns: minmax(12px, 1fr); gap: 2px; }
+.analytics-chart-month .analytics-day-count { font-size: 9px; }
+.analytics-chart-month .analytics-day-label { font-size: 9px; }
+.analytics-chart-month .analytics-bar-track { width: 70%; max-width: 14px; }
+.analytics-legend { display: flex; gap: 14px; color: var(--muted); font-size: 10px; }
+.analytics-legend > span { display: inline-flex; gap: 5px; align-items: center; }
+.analytics-legend i { width: 8px; height: 8px; border-radius: 2px; background: var(--purple-soft); }
+.analytics-legend .analytics-legend-done { background: var(--purple); }
+.analytics-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.analytics-goals { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.analytics-goal-progress { margin-left: auto; color: var(--muted); font-size: 11px; text-align: right; }
+.analytics-comparison { display: grid; align-content: center; gap: 3px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 11px; }
+.analytics-comparison > strong { font-size: 12px; }
+.analytics-comparison > span, .analytics-comparison small { color: var(--muted); }
+.analytics-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+@media (max-width: 760px) {
+  .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analytics-bottom { grid-template-columns: 1fr; }
+  .analytics-goal-progress { max-width: 45%; }
+  .analytics-chart-month { gap: 1px; }
+  .analytics-chart-month .analytics-day-count, .analytics-chart-month .analytics-day-label { font-size: 8px; }
+}
+
+/* In-tab reminders */
+.reminder-panel { display: grid; gap: 10px; }
+.reminder-heading { margin-bottom: 0; }
+.reminder-explainer { margin: -4px 0 0; line-height: 1.5; }
+.reminder-list { display: grid; gap: 7px; }
+.reminder-list > strong { font-size: 12px; }
+.reminder-list ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; }
+.reminder-list li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; color: var(--purple); background: var(--surface-muted); }
+.reminder-list li > span { display: grid; min-width: 0; gap: 2px; }
+.reminder-list li b { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.reminder-list li small { color: var(--muted); font-size: 10px; }

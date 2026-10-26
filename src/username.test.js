@@ -14,6 +14,7 @@ test("rejects invalid usernames", () => {
   for (const name of ["", "ab", "a".repeat(21), "1abc", "_abc", "ann a", "анна", "a-b-c", "a.b.c", "x@y"]) {
     assert.notEqual(validateUsername(name), "", name);
   }
+  for (const name of ["admin", "root", "support", "dayflow"]) assert.match(validateUsername(name), /зарезервировано/);
 });
 
 test("distinguishes email from username and formats display", () => {
