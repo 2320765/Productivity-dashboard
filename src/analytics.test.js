@@ -19,6 +19,24 @@ test("пустая неделя возвращает нулевые показа
   assert.equal(result.days.reduce((sum, day) => sum + day.planned, 0), 0);
 });
 
+test("год группирует задачи по 12 месяцам и сравнивается с прошлым годом", () => {
+  const tasks = [
+    task("a", "2026-01-10", { status: "Выполнено" }),
+    task("b", "2026-10-21"),
+    task("c", "2026-10-30"),
+    task("old", "2025-05-05"),
+  ];
+  const result = getAnalytics(tasks, noGoals, "2026-10-21", "year", "2026-10-25");
+  assert.deepEqual(result.range, { start: "2026-01-01", end: "2026-12-31" });
+  assert.equal(result.days.length, 12);
+  assert.equal(result.days[9].planned, 2);
+  assert.equal(result.days[0].completed, 1);
+  assert.equal(result.planned, 3);
+  const comparison = getAnalyticsComparison(tasks, noGoals, "2026-10-21", "year", "2026-10-25");
+  assert.equal(comparison.previous.planned, 1);
+  assert.equal(comparison.available, true);
+});
+
 test("неделя считает выполненные, активные просроченные, переносы и цели без дублирования", () => {
   const tasks = [
     task("done", "2026-10-19", { status: "Выполнено", goalId: "g" }),

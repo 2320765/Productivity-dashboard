@@ -68,6 +68,7 @@ function mapGoal(row) {
     parentId: row.parent_id,
     priority: row.priority,
     notes: row.notes,
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
   };
 }
 
@@ -83,6 +84,7 @@ function mapTask(row) {
     status: row.status,
     notes: row.notes,
     goalId: row.goal_id,
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
     ...(row.recurrence ? { recurrence: row.recurrence } : {}),
     ...(row.reminder ? { reminder: row.reminder } : {}),
     ...(row.move_count ? { movedFrom: row.moved_from, movedAt: row.moved_at, moveCount: row.move_count } : {}),
@@ -132,7 +134,6 @@ export async function syncRemoteDashboard(userId, rawDashboard, expectedRevision
       priority: goal.priority,
       notes: goal.notes ?? "",
       archived_at: goal.archivedAt ?? null,
-      archived_by: goal.archivedBy ?? null,
     })),
     p_tasks: dashboard.tasks.map((task) => ({
       id: task.id,
@@ -150,6 +151,7 @@ export async function syncRemoteDashboard(userId, rawDashboard, expectedRevision
       moved_from: task.movedFrom ?? null,
       moved_at: task.movedAt ?? null,
       move_count: task.moveCount ?? 0,
+      archived_at: task.archivedAt ?? null,
     })),
     p_expected_revision: expectedRevision,
   });

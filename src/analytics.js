@@ -62,7 +62,7 @@ function calculateGoals(goals, periodTasks, range) {
 }
 
 export function getAnalyticsRange(anchorDate, period) {
-  if (period !== "week" && period !== "month") throw new Error(`Unsupported analytics period: ${period}`);
+  if (period !== "week" && period !== "month" && period !== "year") throw new Error(`Unsupported analytics period: ${period}`);
   return getPeriodRange(anchorDate, period);
 }
 
@@ -73,13 +73,26 @@ export function getAnalytics(tasks, goals, anchorDate, period, today) {
   const completed = periodTasks.filter((task) => task.status === "Выполнено").length;
   const overdue = periodTasks.filter((task) => task.status !== "Выполнено" && dueDate(task) < today).length;
   const days = [];
-  for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
-    const daily = periodTasks.filter((task) => task.date === date);
-    days.push({
-      date,
-      planned: daily.length,
-      completed: daily.filter((task) => task.status === "Выполнено").length,
-    });
+  if (period === "year") {
+    // Для года столбцы — месяцы; date хранит первое число месяца.
+    for (let month = 1; month <= 12; month += 1) {
+      const prefix = `${range.start.slice(0, 4)}-${String(month).padStart(2, "0")}`;
+      const monthly = periodTasks.filter((task) => task.date.startsWith(prefix));
+      days.push({
+        date: `${prefix}-01`,
+        planned: monthly.length,
+        completed: monthly.filter((task) => task.status === "Выполнено").length,
+      });
+    }
+  } else {
+    for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
+      const daily = periodTasks.filter((task) => task.date === date);
+      days.push({
+        date,
+        planned: daily.length,
+        completed: daily.filter((task) => task.status === "Выполнено").length,
+      });
+    }
   }
   return {
     period,
@@ -96,7 +109,9 @@ export function getAnalytics(tasks, goals, anchorDate, period, today) {
 
 export function getAnalyticsComparison(tasks, goals, anchorDate, period, today) {
   const current = getAnalytics(tasks, goals, anchorDate, period, today);
-  const previousAnchor = period === "week" ? addDays(anchorDate, -7) : shiftDate(anchorDate, -1, "month");
+  const previousAnchor = period === "week"
+    ? addDays(anchorDate, -7)
+    : shiftDate(anchorDate, -1, period === "year" ? "year" : "month");
   const previous = getAnalytics(tasks, goals, previousAnchor, period, today);
   return {
     current,

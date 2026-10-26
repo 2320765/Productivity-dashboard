@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>dayflow — Личное пространство продуктивности</title>
+    <!-- Подключение шрифта Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Подключение Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+                    },
+                    colors: {
+                        dayflow: {
+                            bgDark: '#0b0b12',
+                            cardDark: '#151521',
+                            inputDark: '#1e1e2d',
+                            accent: '#a78bfa',
+                            accentHover: '#936ef6',
+                            accentDeep: '#7c3aed'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Базовые переменные для плавной смены тем */
+        :root {
+            --bg-primary: #f6f5ff;
+            --card-bg: rgba(255, 255, 255, 0.82);
+            --card-border: rgba(139, 92, 246, 0.16);
+            --input-bg: rgba(243, 242, 252, 0.85);
+            --input-border: rgba(139, 92, 246, 0.18);
+            --text-main: #141424;
+            --text-muted: #646482;
+            --spotlight-color: rgba(167, 139, 250, 0.14);
+        }
+
+        html.dark {
+            --bg-primary: #0b0b12;
+            --card-bg: rgba(22, 22, 34, 0.78);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --input-bg: rgba(31, 31, 46, 0.85);
+            --input-border: rgba(255, 255, 255, 0.06);
+            --text-main: #f4f4f9;
+            --text-muted: #8e8ea8;
+            --spotlight-color: rgba(167, 139, 250, 0.12);
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            transition: background-color 0.5s cubic-bezier(0.16, 1, 0.3, 1), color 0.4s ease;
+        }
+
+        /* Анимация плавающих фоновых сфер (Aurora Orbs) */
+        @keyframes floatSlow {
+            0%, 100% {
+                transform: translate(0px, 0px) scale(1);
+            }
+            33% {
+                transform: translate(35px, -25px) scale(1.08);
+            }
+            66% {
+                transform: translate(-25px, 25px) scale(0.95);
+            }
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% {
+                opacity: 0.45;
+            }
+            50% {
+                opacity: 0.75;
+            }
+        }
+
+        @keyframes sparkleRotate {
+            0%, 100% {
+                transform: rotate(0deg) scale(1);
+            }
+            50% {
+                transform: rotate(15deg) scale(1.14);
+            }
+        }
+
+        /* Каскадное появление элементов (Staggered Entrance) */
+        @keyframes slideUpFade {
+            0% {
+                opacity: 0;
+                transform: translateY(22px) scale(0.985);
+                filter: blur(4px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0px);
+            }
+        }
+
+        .animate-entrance {
+            opacity: 0;
+            animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .delay-100 { animation-delay: 0.08s; }
+        .delay-200 { animation-delay: 0.16s; }
+        .delay-300 { animation-delay: 0.24s; }
+        .delay-400 { animation-delay: 0.32s; }
+        .delay-500 { animation-delay: 0.40s; }
+        .delay-600 { animation-delay: 0.48s; }
+        .delay-700 { animation-delay: 0.56s; }
+
+        .orb-1 {
+            animation: floatSlow 14s ease-in-out infinite, pulseGlow 8s ease-in-out infinite;
+        }
+        .orb-2 {
+            animation: floatSlow 18s ease-in-out infinite reverse, pulseGlow 10s ease-in-out infinite 2s;
+        }
+
+        .sparkle-icon {
+            animation: sparkleRotate 4s ease-in-out infinite;
+        }
+
+        /* Стеклянная карточка с интерактивным свечением от курсора */
+        .auth-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            box-shadow: 
+                0 25px 50px -12px rgba(0, 0, 0, 0.45),
+                0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+                0 1px 0 0 rgba(255, 255, 255, 0.12) inset;
+            position: relative;
+            overflow: hidden;
+            transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease, transform 0.3s ease;
+        }
+
+        html:not(.dark) .auth-card {
+            box-shadow: 
+                0 20px 45px -15px rgba(109, 40, 217, 0.12),
+                0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+        }
+
+        /* Световой блик, следующий за мышью */
+        .auth-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(
+                550px circle at var(--mouse-x, 50%) var(--mouse-y, 0%),
+                var(--spotlight-color),
+                transparent 40%
+            );
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
+
+        .auth-card:hover::before {
+            opacity: 1;
+        }
+
+        /* Стили полей ввода */
+        .custom-input-wrapper {
+            position: relative;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .custom-input {
+            background-color: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-main);
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .custom-input::placeholder {
+            color: var(--text-muted);
+            opacity: 0.55;
+        }
+
+        .custom-input:hover {
+            border-color: rgba(167, 139, 250, 0.32);
+        }
+
+        .custom-input:focus {
+            outline: none;
+            border-color: #a78bfa;
+            box-shadow: 0 0 0 3.5px rgba(167, 139, 250, 0.18), 0 4px 20px -2px rgba(139, 92, 246, 0.15);
+            transform: translateY(-1px);
+        }
+
+        /* Кнопка входа с градиентом и бликом */
+        .btn-primary {
+            background: linear-gradient(135deg, #b197fc 0%, #9775fa 50%, #845ef7 100%);
+            color: #ffffff;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 8px 24px -6px rgba(151, 117, 250, 0.5), 0 1px 0 0 rgba(255, 255, 255, 0.25) inset;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 28px -6px rgba(151, 117, 250, 0.65), 0 1px 0 0 rgba(255, 255, 255, 0.35) inset;
+            filter: brightness(1.04);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0px) scale(0.985);
+        }
+
+        /* Блик на кнопке */
+        .btn-primary::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -60%;
+            width: 45%;
+            height: 200%;
+            background: linear-gradient(
+                to right,
+                rgba(255, 255, 255, 0) 0%,
+                rgba(255, 255, 255, 0.28) 50%,
+                rgba(255, 255, 255, 0) 100%
+            );
+            transform: rotate(25deg);
+            transition: left 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .btn-primary:hover::after {
+            left: 130%;
+        }
+
+        /* Плавное раскрытие дополнительных полей при регистрации */
+        .expandable-field {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            margin-bottom: 0;
+            transform: translateY(-8px);
+            transition: 
+                max-height 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.35s ease,
+                margin-bottom 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .expandable-field.open {
+            max-height: 110px;
+            opacity: 1;
+            margin-bottom: 1.15rem;
+            transform: translateY(0);
+        }
+
+        /* Тонкая сетка на фоне */
+        .bg-grid-pattern {
+            background-size: 36px 36px;
+            background-image: radial-gradient(circle, rgba(167, 139, 250, 0.09) 1px, transparent 1px);
+        }
+
+        /* Анимация встряхивания при ошибке */
+        @keyframes shakeError {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
+        .shake {
+            animation: shakeError 0.4s ease-in-out;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between relative selection:bg-violet-500/30 selection:text-violet-200">
+
+    <!-- Фоновые анимированные градиентные сферы и сетка -->
+    <div class="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div class="absolute inset-0 bg-grid-pattern"></div>
+        <!-- Верхнее фиолетовое свечение (как на референсе) -->
+        <div class="orb-1 absolute -top-28 -left-24 w-96 h-96 md:w-[520px] md:h-[520px] rounded-full bg-violet-600/20 dark:bg-violet-600/15 blur-[110px]"></div>
+        <!-- Центральное мягкое свечение позади карточки -->
+        <div class="orb-2 absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 md:w-[460px] md:h-[460px] rounded-full bg-indigo-500/15 dark:bg-purple-500/10 blur-[120px]"></div>
+        <!-- Нижний правый блик -->
+        <div class="orb-1 absolute -bottom-32 -right-20 w-80 h-80 rounded-full bg-fuchsia-500/10 dark:bg-violet-500/10 blur-[110px]"></div>
+    </div>
+
+    <!-- Верхняя шапка: Логотип dayflow и переключатель темы -->
+    <header class="w-full px-5 sm:px-8 py-4 sm:py-5 flex items-center justify-between border-b border-violet-500/10 dark:border-white/[0.04] relative z-20 animate-entrance">
+        <!-- Брендинг dayflow -->
+        <a href="#" id="brandLogo" class="flex items-center gap-3 group focus:outline-none">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-400 via-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/25 group-hover:scale-105 group-hover:shadow-violet-500/40 transition-all duration-300">
+                <!-- Иконка искр (Sparkles) -->
+                <svg class="w-5 h-5 text-white sparkle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/>
+                    <path d="M5 3v4M3 5h4M19 17v4M17 19h4" stroke-width="1.75"/>
+                </svg>
+            </div>
+            <div class="flex flex-col">
+                <span class="font-semibold text-[15px] tracking-tight leading-none text-slate-900 dark:text-white group-hover:text-violet-400 transition-colors">
+                    dayflow
+                </span>
+                <span class="text-[11px] text-slate-500 dark:text-[#7c7c96] mt-1 leading-none">
+                    твой день в фокусе
+                </span>
+            </div>
+        </a>
+
+        <!-- Кнопка переключения темы (Солнце / Луна) -->
+        <button 
+            id="themeToggleBtn" 
+            type="button"
+            aria-label="Переключить тему"
+            class="w-9 h-9 rounded-xl bg-white/70 dark:bg-[#191927]/90 border border-slate-200/80 dark:border-white/[0.07] flex items-center justify-center text-slate-600 dark:text-slate-400 hover:text-violet-500 dark:hover:text-violet-300 hover:border-violet-400/40 hover:scale-105 active:scale-95 transition-all duration-200 shadow-sm"
+        >
+            <!-- Иконка солнца (показывается в тёмной теме) -->
+            <svg id="sunIcon" class="w-4 h-4 hidden dark:block transition-transform duration-500 hover:rotate-45" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4"/>
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+            </svg>
+            <!-- Иконка луны (показывается в светлой теме) -->
+            <svg id="moonIcon" class="w-4 h-4 block dark:hidden transition-transform duration-500 hover:-rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+        </button>
+    </header>
+
+    <!-- Центральный контейнер с карточкой входа -->
+    <main class="flex-1 flex items-center justify-center px-4 py-8 sm:py-12 relative z-10">
+        <div 
+            id="authCard" 
+            class="auth-card w-full max-w-[410px] rounded-[24px] p-6 sm:p-8 animate-entrance delay-100"
+        >
+            <!-- Внутренний контент поверх свечения -->
+            <div class="relative z-10">
+                
+                <!-- Верхний бейдж «Личное пространство продуктивности» -->
+                <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 dark:bg-[#231d3c]/90 border border-violet-500/20 dark:border-violet-400/15 mb-5 animate-entrance delay-200">
+                    <svg class="w-3.5 h-3.5 text-violet-600 dark:text-[#b197fc] sparkle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/>
+                        <path d="M5 3v4M3 5h4"/>
+                    </svg>
+                    <span class="text-[11px] font-medium tracking-wide text-violet-700 dark:text-[#c4b5fd]">
+                        Личное пространство продуктивности
+                    </span>
+                </div>
+
+                <!-- Заголовок и подзаголовок -->
+                <div class="mb-6 animate-entrance delay-300">
+                    <h1 id="cardTitle" class="text-[22px] sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white transition-all duration-300">
+                        С возвращением
+                    </h1>
+                    <p id="cardSubtitle" class="text-xs sm:text-[13px] leading-relaxed text-slate-500 dark:text-[#8e8ea8] mt-2 transition-all duration-300">
+                        Войдите, чтобы синхронизировать цели и задачи между устройствами.
+                    </p>
+                </div>
+
+                <!-- Форма авторизации -->
+                <form id="authForm" class="space-y-4" novalidate>
+                    
+                    <!-- Дополнительное поле «Имя» (появляется при переключении на Регистрацию) -->
+                    <div id="nameFieldWrapper" class="expandable-field">
+                        <label for="nameInput" class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#8e8ea8] mb-2">
+                            Ваше имя
+                        </label>
+                        <div class="custom-input-wrapper">
+                            <input 
+                                id="nameInput" 
+                                type="text" 
+                                autocomplete="name"
+                                placeholder="Александр"
+                                class="custom-input w-full h-11 px-3.5 rounded-xl text-sm"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Поле: Электронная почта -->
+                    <div class="animate-entrance delay-400">
+                        <label for="emailInput" class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#8e8ea8] mb-2">
+                            Электронная почта
+                        </label>
+                        <div class="custom-input-wrapper">
+                            <input 
+                                id="emailInput" 
+                                type="email" 
+                                required
+                                autocomplete="email"
+                                placeholder="name@dayflow.app"
+                                class="custom-input w-full h-11 px-3.5 rounded-xl text-sm"
+                            >
+                        </div>
+                        <p id="emailError" class="hidden text-[11px] text-rose-400 mt-1.5 pl-0.5">
+                            Пожалуйста, введите корректный адрес почты
+                        </p>
+                    </div>
+
+                    <!-- Поле: Пароль -->
+                    <div id="passwordSection" class="animate-entrance delay-500 transition-all duration-300">
+                        <div class="flex items-center justify-between mb-2">
+                            <label for="passwordInput" class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#8e8ea8]">
+                                Пароль
+                            </label>
+                            <button 
+                                type="button" 
+                                id="forgotPasswordBtn"
+                                class="text-[11px] text-slate-400 dark:text-[#7c7c96] hover:text-violet-500 dark:hover:text-[#b197fc] transition-colors focus:outline-none"
+                            >
+                                Забыли пароль?
+                            </button>
+                        </div>
+                        <div class="custom-input-wrapper relative">
+                            <input 
+                                id="passwordInput" 
+                                type="password" 
+                                required
+                                autocomplete="current-password"
+                                placeholder="••••••••"
+                                class="custom-input w-full h-11 pl-3.5 pr-10 rounded-xl text-sm"
+                            >
+                            <!-- Кнопка показать/скрыть пароль -->
+                            <button 
+                                type="button" 
+                                id="togglePasswordBtn"
+                                aria-label="Показать пароль"
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-400 dark:text-[#6e6e88] hover:text-violet-500 dark:hover:text-violet-300 transition-colors focus:outline-none"
+                            >
+                                <!-- Глаз открыт -->
+                                <svg id="eyeOpenIcon" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <!-- Глаз закрыт -->
+                                <svg id="eyeClosedIcon" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                                    <line x1="1" y1="1" x2="23" y2="23"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Индикатор надежности пароля (активен при регистрации) -->
+                        <div id="passwordStrengthBox" class="hidden mt-2.5 space-y-1">
+                            <div class="flex gap-1.5 h-1">
+                                <div id="strengthBar1" class="flex-1 rounded-full bg-slate-200 dark:bg-white/10 transition-colors duration-300"></div>
+                                <div id="strengthBar2" class="flex-1 rounded-full bg-slate-200 dark:bg-white/10 transition-colors duration-300"></div>
+                                <div id="strengthBar3" class="flex-1 rounded-full bg-slate-200 dark:bg-white/10 transition-colors duration-300"></div>
+                            </div>
+                            <p id="strengthLabel" class="text-[10px] text-slate-400 dark:text-[#7c7c96]">
+                                Минимум 6 символов
+                            </p>
+                        </div>
+
+                        <p id="passwordError" class="hidden text-[11px] text-rose-400 mt-1.5 pl-0.5">
+                            Введите пароль (не менее 6 символов)
+                        </p>
+                    </div>
+
+                    <!-- Основная кнопка «Войти» -->
+                    <div class="pt-1.5 animate-entrance delay-600">
+                        <button 
+                            type="submit" 
+                            id="submitBtn"
+                            class="btn-primary w-full h-11 rounded-xl font-medium text-[13px] tracking-wide flex items-center justify-center gap-2 focus:outline-none"
+                        >
+                            <span id="submitBtnText">Войти</span>
+                            <!-- Спиннер загрузки -->
+                            <svg id="submitSpinner" class="hidden w-4 h-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                                <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Переключатель режима: «Нет аккаунта? Зарегистрироваться» -->
+                <div class="mt-5 text-center animate-entrance delay-700">
+                    <button 
+                        type="button" 
+                        id="modeSwitchBtn"
+                        class="text-xs font-medium text-violet-600 dark:text-[#9775fa] hover:text-violet-500 dark:hover:text-[#b197fc] transition-colors focus:outline-none"
+                    >
+                        Нет аккаунта? <span class="underline decoration-violet-500/40 underline-offset-4 hover:decoration-violet-400">Зарегистрироваться</span>
+                    </button>
+                </div>
+
+                <!-- Уведомление об успешном действии (скрыто по умолчанию) -->
+                <div 
+                    id="statusBanner" 
+                    class="hidden mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-300 text-xs flex items-center gap-2.5 transition-all duration-300"
+                >
+                    <svg class="w-4 h-4 shrink-0 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    <span id="statusBannerText">Синхронизация выполнена! Добро пожаловать в dayflow.</span>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- Минималистичный футер -->
+    <footer class="w-full py-4 text-center text-[11px] text-slate-400 dark:text-[#56566e] relative z-10 animate-entrance delay-700">
+        <span>dayflow &copy; 2026 &bull; Защищённая синхронизация</span>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const htmlEl = document.documentElement;
+            const themeToggleBtn = document.getElementById('themeToggleBtn');
+            const authCard = document.getElementById('authCard');
+            const authForm = document.getElementById('authForm');
+
+            // Элементы управления режимами (Вход / Регистрация / Сброс пароля)
+            const cardTitle = document.getElementById('cardTitle');
+            const cardSubtitle = document.getElementById('cardSubtitle');
+            const nameFieldWrapper = document.getElementById('nameFieldWrapper');
+            const nameInput = document.getElementById('nameInput');
+            const emailInput = document.getElementById('emailInput');
+            const passwordSection = document.getElementById('passwordSection');
+            const passwordInput = document.getElementById('passwordInput');
+            const togglePasswordBtn = document.getElementById('togglePasswordBtn');
+            const eyeOpenIcon = document.getElementById('eyeOpenIcon');
+            const eyeClosedIcon = document.getElementById('eyeClosedIcon');
+            const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+            const submitBtn = document.getElementById('submitBtn');
+            const submitBtnText = document.getElementById('submitBtnText');
+            const submitSpinner = document.getElementById('submitSpinner');
+            const modeSwitchBtn = document.getElementById('modeSwitchBtn');
+            const statusBanner = document.getElementById('statusBanner');
+            const statusBannerText = document.getElementById('statusBannerText');
+
+            // Ошибки и индикатор пароля
+            const emailError = document.getElementById('emailError');
+            const passwordError = document.getElementById('passwordError');
+            const passwordStrengthBox = document.getElementById('passwordStrengthBox');
+            const strengthBar1 = document.getElementById('strengthBar1');
+            const strengthBar2 = document.getElementById('strengthBar2');
+            const strengthBar3 = document.getElementById('strengthBar3');
+            const strengthLabel = document.getElementById('strengthLabel');
+
+            // Текущий режим: 'login' | 'register' | 'reset'
+            let currentMode = 'login';
+
+            // 1. Интерактивное свечение карточки за курсором мыши (Spotlight Effect)
+            authCard.addEventListener('mousemove', (e) => {
+                const rect = authCard.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                authCard.style.setProperty('--mouse-x', `${x}px`);
+                authCard.style.setProperty('--mouse-y', `${y}px`);
+            });
+
+            // 2. Переключение тёмной и светлой темы
+            themeToggleBtn.addEventListener('click', () => {
+                htmlEl.classList.toggle('dark');
+            });
+
+            // 3. Показать / скрыть пароль с микроанимацией
+            togglePasswordBtn.addEventListener('click', () => {
+                const isPassword = passwordInput.type === 'password';
+                passwordInput.type = isPassword ? 'text' : 'password';
+                eyeOpenIcon.classList.toggle('hidden', isPassword);
+                eyeClosedIcon.classList.toggle('hidden', !isPassword);
+                passwordInput.focus();
+            });
+
+            // 4. Индикатор надёжности пароля в режиме регистрации
+            passwordInput.addEventListener('input', () => {
+                passwordError.classList.add('hidden');
+                if (currentMode !== 'register') return;
+
+                const val = passwordInput.value;
+                let score = 0;
+                if (val.length >= 6) score++;
+                if (val.length >= 10 || /[A-ZА-Я]/.test(val)) score++;
+                if (/[0-9]/.test(val) && /[^A-Za-zА-Яа-я0-9]/.test(val)) score++;
+
+                // Сброс цветов
+                [strengthBar1, strengthBar2, strengthBar3].forEach(bar => {
+                    bar.className = 'flex-1 rounded-full bg-slate-200 dark:bg-white/10 transition-colors duration-300';
+                });
+
+                if (val.length === 0) {
+                    strengthLabel.textContent = 'Минимум 6 символов';
+                } else if (score <= 1) {
+                    strengthBar1.classList.replace('bg-slate-200', 'bg-rose-400');
+                    strengthBar1.classList.replace('dark:bg-white/10', 'dark:bg-rose-400');
+                    strengthLabel.textContent = 'Слабый пароль';
+                } else if (score === 2) {
+                    [strengthBar1, strengthBar2].forEach(bar => {
+                        bar.classList.replace('bg-slate-200', 'bg-amber-400');
+                        bar.classList.replace('dark:bg-white/10', 'dark:bg-amber-400');
+                    });
+                    strengthLabel.textContent = 'Хороший пароль';
+                } else {
+                    [strengthBar1, strengthBar2, strengthBar3].forEach(bar => {
+                        bar.classList.replace('bg-slate-200', 'bg-emerald-400');
+                        bar.classList.replace('dark:bg-white/10', 'dark:bg-emerald-400');
+                    });
+                    strengthLabel.textContent = 'Надёжный пароль';
+                }
+            });
+
+            emailInput.addEventListener('input', () => {
+                emailError.classList.add('hidden');
+            });
+
+            // 5. Плавная смена режима (Вход <-> Регистрация <-> Восстановление)
+            function setMode(newMode) {
+                currentMode = newMode;
+                statusBanner.classList.add('hidden');
+                emailError.classList.add('hidden');
+                passwordError.classList.add('hidden');
+
+                // Небольшой эффект затухания текста заголовка
+                cardTitle.style.opacity = '0';
+                cardSubtitle.style.opacity = '0';
+
+                setTimeout(() => {
+                    if (newMode === 'login') {
+                        cardTitle.textContent = 'С возвращением';
+                        cardSubtitle.textContent = 'Войдите, чтобы синхронизировать цели и задачи между устройствами.';
+                        nameFieldWrapper.classList.remove('open');
+                        passwordSection.classList.remove('hidden');
+                        forgotPasswordBtn.classList.remove('hidden');
+                        passwordStrengthBox.classList.add('hidden');
+                        submitBtnText.textContent = 'Войти';
+                        modeSwitchBtn.innerHTML = 'Нет аккаунта? <span class="underline decoration-violet-500/40 underline-offset-4 hover:decoration-violet-400">Зарегистрироваться</span>';
+                    } else if (newMode === 'register') {
+                        cardTitle.textContent = 'Создать аккаунт';
+                        cardSubtitle.textContent = 'Начните планировать свой день осознанно и синхронизируйте задачи.';
+                        nameFieldWrapper.classList.add('open');
+                        passwordSection.classList.remove('hidden');
+                        forgotPasswordBtn.classList.add('hidden');
+                        passwordStrengthBox.classList.remove('hidden');
+                        submitBtnText.textContent = 'Зарегистрироваться';
+                        modeSwitchBtn.innerHTML = 'Уже есть аккаунт? <span class="underline decoration-violet-500/40 underline-offset-4 hover:decoration-violet-400">Войти</span>';
+                    } else if (newMode === 'reset') {
+                        cardTitle.textContent = 'Сброс пароля';
+                        cardSubtitle.textContent = 'Укажите вашу почту, и мы отправим ссылку для быстрого восстановления доступа.';
+                        nameFieldWrapper.classList.remove('open');
+                        passwordSection.classList.add('hidden');
+                        passwordStrengthBox.classList.add('hidden');
+                        submitBtnText.textContent = 'Отправить ссылку';
+                        modeSwitchBtn.innerHTML = 'Вспомнили пароль? <span class="underline decoration-violet-500/40 underline-offset-4 hover:decoration-violet-400">Вернуться ко входу</span>';
+                    }
+
+                    cardTitle.style.opacity = '1';
+                    cardSubtitle.style.opacity = '1';
+                }, 140);
+            }
+
+            modeSwitchBtn.addEventListener('click', () => {
+                if (currentMode === 'login') {
+                    setMode('register');
+                } else {
+                    setMode('login');
+                }
+            });
+
+            forgotPasswordBtn.addEventListener('click', () => {
+                setMode('reset');
+            });
+
+            // 6. Обработка отправки формы с анимацией загрузки и валидацией
+            authForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                statusBanner.classList.add('hidden');
+
+                const emailVal = emailInput.value.trim();
+                const passVal = passwordInput.value;
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+                let hasError = false;
+
+                if (!emailRegex.test(emailVal)) {
+                    emailError.classList.remove('hidden');
+                    hasError = true;
+                }
+
+                if (currentMode !== 'reset' && passVal.length < 6) {
+                    passwordError.classList.remove('hidden');
+                    hasError = true;
+                }
+
+                if (hasError) {
+                    authCard.classList.remove('shake');
+                    void authCard.offsetWidth; // Перезапуск CSS-анимации
+                    authCard.classList.add('shake');
+                    return;
+                }
+
+                // Имитация процесса авторизации
+                submitBtn.disabled = true;
+                submitSpinner.classList.remove('hidden');
+                const originalText = submitBtnText.textContent;
+                submitBtnText.textContent = 'Синхронизация...';
+
+                setTimeout(() => {
+                    submitBtn.disabled = false;
+                    submitSpinner.classList.add('hidden');
+                    submitBtnText.textContent = originalText;
+
+                    if (currentMode === 'login') {
+                        statusBannerText.textContent = 'С возвращением! Ваши цели и задачи успешно синхронизированы.';
+                    } else if (currentMode === 'register') {
+                        const userName = nameInput.value.trim() || 'друг';
+                        statusBannerText.textContent = `Аккаунт создан, ${userName}! Добро пожаловать в пространство dayflow.`;
+                    } else {
+                        statusBannerText.textContent = `Инструкция по восстановлению отправлена на ${emailVal}.`;
+                    }
+
+                    statusBanner.classList.remove('hidden');
+                }, 1100);
+            });
+        });
+    </script>
+</body>
+</html>

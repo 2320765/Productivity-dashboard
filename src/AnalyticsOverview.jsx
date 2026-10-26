@@ -2,11 +2,19 @@ import { useMemo, useState } from "react";
 import { BarChart3, CheckCheck, Clock3, Repeat, Target } from "lucide-react";
 import { getAnalyticsComparison } from "./analytics.js";
 
+const PERIOD_NAMES = { week: "Неделя", month: "Месяц", year: "Год" };
+const PERIOD_CHART_LABELS = { week: "Задачи по дням недели", month: "Задачи по дням месяца", year: "Задачи по месяцам года" };
+const PERIOD_PREVIOUS = {
+  week: { short: "периоду", long: "предыдущую неделю" },
+  month: { short: "месяцу", long: "предыдущий месяц" },
+  year: { short: "году", long: "предыдущий год" },
+};
+
 function formatRange(range, period) {
   const formatter = new Intl.DateTimeFormat("ru-RU", {
     day: "numeric",
     month: "short",
-    ...(period === "month" ? { year: "numeric" } : {}),
+    ...(period !== "week" ? { year: "numeric" } : {}),
   });
   return `${formatter.format(new Date(`${range.start}T12:00:00`))} — ${formatter.format(new Date(`${range.end}T12:00:00`))}`;
 }
@@ -33,10 +41,11 @@ export default function AnalyticsOverview({ tasks, goals, selectedDate, today })
         <div className="view-switch" role="tablist" aria-label="Период аналитики">
           <button type="button" role="tab" aria-selected={period === "week"} className={period === "week" ? "view-tab active" : "view-tab"} onClick={() => setPeriod("week")}>Неделя</button>
           <button type="button" role="tab" aria-selected={period === "month"} className={period === "month" ? "view-tab active" : "view-tab"} onClick={() => setPeriod("month")}>Месяц</button>
+          <button type="button" role="tab" aria-selected={period === "year"} className={period === "year" ? "view-tab active" : "view-tab"} onClick={() => setPeriod("year")}>Год</button>
         </div>
       </div>
 
-      <div className="analytics-period">{period === "week" ? "Неделя" : "Месяц"} · {formatRange(current.range, period)}</div>
+      <div className="analytics-period">{PERIOD_NAMES[period]} · {formatRange(current.range, period)}</div>
       <div className="analytics-metrics">
         <article className="analytics-metric"><span className="analytics-metric-icon"><BarChart3 size={16} /></span><div><small>Запланировано</small><strong>{current.planned}</strong></div></article>
         <article className="analytics-metric"><span className="analytics-metric-icon analytics-green"><CheckCheck size={16} /></span><div><small>Выполнено</small><strong>{current.completed} <em>/ {current.planned}</em></strong></div></article>
@@ -51,16 +60,18 @@ export default function AnalyticsOverview({ tasks, goals, selectedDate, today })
         </div>
       </div>
 
-      <div className={`analytics-chart analytics-chart-${period}`} role="img" aria-label={`${period === "week" ? "Задачи по дням недели" : "Задачи по дням месяца"}`}>
+      <div className={`analytics-chart analytics-chart-${period}`} role="img" aria-label={PERIOD_CHART_LABELS[period]}>
         {current.days.map((day) => {
           const date = new Date(`${day.date}T12:00:00`);
           const label = period === "week"
             ? new Intl.DateTimeFormat("ru-RU", { weekday: "short" }).format(date)
-            : String(Number(day.date.slice(8)));
+            : period === "year"
+              ? new Intl.DateTimeFormat("ru-RU", { month: "short" }).format(date).replace(".", "")
+              : String(Number(day.date.slice(8)));
           const height = day.planned ? Math.max(8, Math.round(day.planned / maxPlanned * 100)) : 0;
           const completedHeight = day.planned ? Math.round(day.completed / day.planned * height) : 0;
           return (
-            <div className="analytics-day" key={day.date} title={`${day.date}: ${day.completed} из ${day.planned} выполнено`}>
+            <div className="analytics-day" key={day.date} title={`${period === "year" ? day.date.slice(0, 7) : day.date}: ${day.completed} из ${day.planned} выполнено`}>
               <span className="analytics-day-count">{day.planned || ""}</span>
               <div className="analytics-bar-track"><span className="analytics-bar" style={{ height: `${height}%` }}><span className="analytics-bar-done" style={{ height: `${day.planned ? completedHeight / height * 100 : 0}%` }} /></span></div>
               <span className="analytics-day-label">{label}</span>
@@ -81,11 +92,11 @@ export default function AnalyticsOverview({ tasks, goals, selectedDate, today })
         <div className="analytics-comparison">
           {comparison.available ? (
             <>
-              <strong>К предыдущему {period === "week" ? "периоду" : "месяцу"}</strong>
+              <strong>К предыдущему {PERIOD_PREVIOUS[period].short}</strong>
               <span>Задачи {deltaText(comparison.plannedDelta)} · выполнено {deltaText(comparison.completedDelta)} · процент {deltaText(comparison.percentDelta, " п.п.")}</span>
               <small>Ранее: {previous.completed}/{previous.planned} ({previous.percent}%)</small>
             </>
-          ) : <span>Для сравнения нужны задачи за {period === "week" ? "предыдущую неделю" : "предыдущий месяц"}.</span>}
+          ) : <span>Для сравнения нужны задачи за {PERIOD_PREVIOUS[period].long}.</span>}
         </div>
       </div>
       <p className="analytics-note">

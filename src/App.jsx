@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -9,6 +10,8 @@ import {
   ChevronDown,
   Circle,
   Clock3,
+  Eye,
+  EyeOff,
   ListTodo,
   LogOut,
   Moon,
@@ -56,6 +59,9 @@ import Workspaces from "./Workspaces.jsx";
 import Friends from "./Friends.jsx";
 import TaskCalendar from "./Calendar.jsx";
 import OverdueTasks from "./Overdue.jsx";
+import ArchiveView, { GlobalSearch } from "./ArchiveView.jsx";
+import BackupDialog from "./BackupDialog.jsx";
+import { getResultTarget, isArchived, setArchived } from "./archive.js";
 import AnalyticsOverview from "./AnalyticsOverview.jsx";
 import ReminderCenter from "./ReminderCenter.jsx";
 import { getReminderTarget, normalizeReminder, REMINDER_LEADS } from "./reminders.js";
@@ -94,6 +100,16 @@ function dashboardsMatch(first, second) {
   return JSON.stringify(normalize(first)) === JSON.stringify(normalize(second));
 }
 
+function passwordStrength(value) {
+  if (!value) return { level: 0, label: "Минимум 6 символов" };
+  let score = 0;
+  if (value.length >= 6) score += 1;
+  if (value.length >= 10 || (/[a-zа-я]/i.test(value) && /\d/.test(value))) score += 1;
+  if (value.length >= 8 && /[A-ZА-Я]/.test(value) && /[a-zа-я]/.test(value) && /[\d\W_]/.test(value)) score += 1;
+  if (value.length < 6) return { level: 1, label: "Слишком короткий пароль" };
+  return { level: score, label: ["", "Простой пароль", "Хороший пароль", "Надёжный пароль"][score] };
+}
+
 function AuthScreen({
   theme,
   setTheme,
@@ -107,7 +123,15 @@ function AuthScreen({
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [notice, setNotice] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const usernameError = mode === "signup" ? validateUsername(username) : "";
+  const strength = passwordStrength(password);
+
+  function trackPointer(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.style.setProperty("--mouse-x", `${event.clientX - rect.left}px`);
+    event.currentTarget.style.setProperty("--mouse-y", `${event.clientY - rect.top}px`);
+  }
 
   async function submit(event) {
     event.preventDefault();
@@ -117,7 +141,8 @@ function AuthScreen({
   }
 
   return (
-    <main className="app-shell" data-theme={theme}>
+    <main className="app-shell auth-shell" data-theme={theme}>
+      <div className="auth-orbs" aria-hidden="true"><span className="auth-orb auth-orb-1" /><span className="auth-orb auth-orb-2" /><span className="auth-orb auth-orb-3" /></div>
       <div className="dashboard">
         <header className="topbar">
           <a href="#" className="brand" aria-label="Dayflow — начало">
@@ -128,7 +153,7 @@ function AuthScreen({
             {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
           </button>
         </header>
-        <section className="auth-panel">
+        <section className="auth-panel" onMouseMove={trackPointer}>
           <div className="auth-intro">
             <span className="eyebrow"><Sparkles size={14} /> Личное пространство продуктивности</span>
             <h1>{mode === "login" ? "С возвращением" : "Создайте аккаунт"}</h1>
@@ -138,16 +163,20 @@ function AuthScreen({
           <form className="auth-form" onSubmit={submit}>
             <label className="field">
               <span>Электронная почта</span>
-              <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+              <input type="email" autoComplete="email" required placeholder="name@dayflow.app" value={email} onChange={(event) => setEmail(event.target.value)} />
             </label>
-            {mode === "signup" && <label className="field">
+            {mode === "signup" && <label className="field field-expand">
               <span>Username</span>
-              <input autoComplete="username" autoCapitalize="none" spellCheck="false" required minLength="3" maxLength="20" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="например, anna_lee" />
+              <input name="dayflow-handle" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck="false" required minLength="3" maxLength="20" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="например, anna_lee" />
               <small className={usernameError ? "form-error" : "workspace-hint"}>{usernameError || "Уникальное имя: латинские буквы, цифры и _, от 3 до 20 символов."}</small>
             </label>}
             <label className="field">
               <span>Пароль</span>
-              <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength="6" required value={password} onChange={(event) => setPassword(event.target.value)} />
+              <div className="password-wrap">
+                <input type={showPassword ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength="6" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" />
+                <button type="button" className="password-toggle" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+              </div>
+              {mode === "signup" && <div className="strength" data-level={strength.level}><div className="strength-bars"><i /><i /><i /></div><small>{strength.label}</small></div>}
             </label>
             {error && <p className="sync-alert" role="alert">{error}<button type="button" onClick={onClearError} aria-label="Закрыть сообщение"><X size={15} /></button></p>}
             {notice && <p className="sync-notice" role="status">{notice}</p>}
@@ -794,6 +823,8 @@ function App() {
   const [taskDialog, setTaskDialog] = useState(undefined);
   const [taskDefaults, setTaskDefaults] = useState(null);
   const [taskLayout, setTaskLayout] = useState("table");
+  const [highlightKey, setHighlightKey] = useState("");
+  const [backupOpen, setBackupOpen] = useState(false);
   const [taskShareDialog, setTaskShareDialog] = useState(null);
   const [activeSection, setActiveSection] = useState("dashboard");
   const [workspaceOverview, setWorkspaceOverview] = useState({ workspaces: [], invitations: [] });
@@ -1012,6 +1043,14 @@ function App() {
 
         try {
           const remote = await loadRemoteDashboard(userId);
+          // Пока шла загрузка, пользователь мог изменить данные (например, удалить задачи) — не затираем их.
+          if (dirtyRef.current || syncInProgress.current) {
+            if (remote.revision > revisionRef.current) {
+              setRemoteConflict({ revision: remote.revision });
+              setSyncState("conflict");
+            }
+            return;
+          }
           revisionRef.current = remote.revision;
           skipSyncOnce.current = true;
           setDashboard(remote.dashboard);
@@ -1052,7 +1091,10 @@ function App() {
     };
   }, [userId, initializedUserId]);
 
-  const { goals, tasks } = dashboard;
+  const { goals: allGoals, tasks: allTasks } = dashboard;
+  // Обычные списки работают только с живыми записями; прогресс и статистика видят и архив.
+  const goals = useMemo(() => allGoals.filter((goal) => !isArchived(goal)), [allGoals]);
+  const tasks = useMemo(() => allTasks.filter((task) => !isArchived(task)), [allTasks]);
   const range = useMemo(() => getPeriodRange(selectedDate, view), [selectedDate, view]);
   const filterSourceTasks = useMemo(
     () => getTaskSearchRows(tasks, range, taskFilters.dateScope, localDateString()),
@@ -1090,9 +1132,15 @@ function App() {
       .sort((a, b) => GOAL_PERIODS.indexOf(a.period) - GOAL_PERIODS.indexOf(b.period) || a.startDate.localeCompare(b.startDate));
   }, [goals, range.end, range.start, view]);
 
-  const completedCount = visibleTasks.filter((task) => task.status === "Выполнено").length;
+  const archivedPeriodTasks = useMemo(
+    () => expandTasks(allTasks.filter(isArchived), range.start, range.end),
+    [allTasks, range.end, range.start],
+  );
+  const archivedPeriodDone = archivedPeriodTasks.filter((task) => task.status === "Выполнено").length;
+  const completedCount = visibleTasks.filter((task) => task.status === "Выполнено").length + archivedPeriodDone;
+  const progressTotal = visibleTasks.length + archivedPeriodTasks.length;
   const overdueCount = useMemo(() => getOverdueTasks(tasks, localDateString()).length, [tasks]);
-  const progress = visibleTasks.length ? Math.round((completedCount / visibleTasks.length) * 100) : 0;
+  const progress = progressTotal ? Math.round((completedCount / progressTotal) * 100) : 0;
   const yearMonths = useMemo(
     () => Array.from({ length: 12 }, (_, index) => new Date(Number(selectedDate.slice(0, 4)), index, 1, 12)),
     [selectedDate],
@@ -1391,6 +1439,38 @@ function App() {
     updateDashboard((current) => ({ ...current, tasks: current.tasks.filter((item) => item.id !== task.id) }));
   }
 
+  function archiveRecord(type, id) {
+    updateDashboard((current) => setArchived(current, type, id, true));
+  }
+
+  function restoreRecord(row) {
+    updateDashboard((current) => setArchived(current, row.type, row.id, false));
+  }
+
+  function deleteArchived(row) {
+    if (row.type === "goal") {
+      const goal = allGoals.find((item) => item.id === row.id);
+      if (goal) deleteGoal(goal);
+    } else {
+      const task = allTasks.find((item) => item.id === row.id);
+      if (task) deleteTask(task);
+    }
+  }
+
+  function openSearchResult(result) {
+    const target = getResultTarget(result);
+    setView("day");
+    setSelectedDate(target.selectedDate);
+    setTaskLayout(target.layout);
+    setTaskFilters(EMPTY_TASK_FILTERS);
+    setSearch("");
+    setHighlightKey(target.highlightKey);
+    setTimeout(() => {
+      document.querySelector(`[data-record-key="${target.highlightKey}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 80);
+    setTimeout(() => setHighlightKey(""), 4000);
+  }
+
   function updateDashboard(updater) {
     dirtyRef.current = true;
     setDashboard(updater);
@@ -1540,7 +1620,7 @@ function App() {
           </div>
           <div className="welcome-stat">
             <span className="stat-icon"><CheckCheck size={21} /></span>
-            <span><strong>{completedCount}<i> / {visibleTasks.length}</i></strong><small>задач выполнено</small></span>
+            <span><strong>{completedCount}<i> / {progressTotal}</i></strong><small>задач выполнено</small></span>
           </div>
           <div className="welcome-art" aria-hidden="true"><span /><span /><span /></div>
         </section>
@@ -1570,7 +1650,7 @@ function App() {
                 const monthKey = localDateString(month).slice(0, 7);
                 const monthRange = getPeriodRange(localDateString(month), "month");
                 const monthGoals = goals.filter((goal) => goal.period === "month" && goal.startDate.slice(0, 7) === monthKey);
-                const monthTasks = expandTasks(tasks, monthRange.start, monthRange.end);
+                const monthTasks = expandTasks(allTasks, monthRange.start, monthRange.end);
                 const done = monthTasks.filter((task) => task.status === "Выполнено").length;
                 return (
                   <button type="button" key={monthKey} className="month-card" onClick={() => chooseMonth(month)}>
@@ -1585,6 +1665,8 @@ function App() {
           </section>
         )}
 
+        <GlobalSearch dashboard={dashboard} onSelect={openSearchResult} />
+
         <section className="summary-grid">
           <article className="summary-card">
             <span className="summary-icon purple"><Target size={19} /></span>
@@ -1596,12 +1678,12 @@ function App() {
           </article>
           <article className="summary-card summary-progress">
             <span className="summary-icon amber"><CheckCheck size={19} /></span>
-            <span className="summary-progress-copy"><small>Выполнено · {progress}%</small><strong>{completedCount} из {visibleTasks.length}</strong><ProgressBar percent={progress} /></span>
+            <span className="summary-progress-copy"><small>Выполнено · {progress}%</small><strong>{completedCount} из {progressTotal}</strong>{archivedPeriodTasks.length > 0 && <small className="archive-progress-note">в т.ч. в архиве: {archivedPeriodTasks.length}</small>}<ProgressBar percent={progress} /></span>
           </article>
         </section>
 
         <ReminderCenter key={userId ?? "guest"} tasks={tasks} userId={userId} />
-        <AnalyticsOverview tasks={tasks} goals={goals} selectedDate={selectedDate} today={localDateString()} />
+        <AnalyticsOverview tasks={allTasks} goals={allGoals} selectedDate={selectedDate} today={localDateString()} />
 
         <section className="panel goals-panel">
           <div className="section-heading">
@@ -1611,10 +1693,10 @@ function App() {
           {visibleGoals.length ? (
             <div className="goals-list">
               {visibleGoals.map((goal) => {
-                const goalProgress = getGoalProgress(goal.id, goals, tasks);
+                const goalProgress = getGoalProgress(goal.id, allGoals, allTasks);
                 const parent = goals.find((item) => item.id === goal.parentId);
                 return (
-                  <article className="goal-card" key={goal.id}>
+                  <article className={`goal-card${highlightKey === `goal:${goal.id}` ? " record-highlight" : ""}`} key={goal.id} data-record-key={`goal:${goal.id}`}>
                     <div className="goal-timeline"><span className={`goal-dot goal-${goal.period}`} /><span className="goal-line" /></div>
                     <div className="goal-content">
                       <div className="goal-main">
@@ -1629,6 +1711,7 @@ function App() {
                       </div>
                       <div className="goal-actions">
                         <button className="icon-button" type="button" onClick={() => setGoalDialog(goal)} aria-label={`Редактировать цель ${goal.title}`} title="Редактировать"><ChevronDown size={16} /></button>
+                        <button className="icon-button" type="button" onClick={() => archiveRecord("goal", goal.id)} aria-label={`Архивировать цель ${goal.title}`} title="В архив"><Archive size={16} /></button>
                         <button className="icon-button danger-hover" type="button" onClick={() => deleteGoal(goal)} aria-label={`Удалить цель ${goal.title}`} title="Удалить"><Trash2 size={16} /></button>
                       </div>
                     </div>
@@ -1650,6 +1733,7 @@ function App() {
                 <button type="button" role="tab" aria-selected={taskLayout === "table"} className={taskLayout === "table" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("table")}>Таблица</button>
                 <button type="button" role="tab" aria-selected={taskLayout === "calendar"} className={taskLayout === "calendar" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("calendar")}>Календарь</button>
                 <button type="button" role="tab" aria-selected={taskLayout === "overdue"} className={taskLayout === "overdue" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("overdue")}>Просрочено{overdueCount > 0 && <span className="overdue-count">{overdueCount}</span>}</button>
+                <button type="button" role="tab" aria-selected={taskLayout === "archive"} className={taskLayout === "archive" ? "view-tab active" : "view-tab"} onClick={() => setTaskLayout("archive")}>Архив</button>
               </div>
               <button type="button" className="button button-primary" onClick={() => { setTaskDefaults(null); setTaskDialog(null); }}><Plus size={17} /> Новая задача</button>
             </div>
@@ -1657,6 +1741,7 @@ function App() {
           <QuickAddTask goals={goals} selectedDate={selectedDate} syncState={syncState} onSave={saveTask} />
           {taskLayout === "calendar" && <TaskCalendar tasks={tasks} selectedDate={selectedDate} onDateChange={setSelectedDate} onOpenTask={(task) => { setTaskDefaults(null); setTaskDialog(task.recurrence ? tasks.find((item) => item.id === task.id) ?? task : task); }} onCreateTask={createTaskFromCalendar} onMoveTask={moveTask} />}
           {taskLayout === "overdue" && <OverdueTasks tasks={tasks} goals={goals} today={localDateString()} onApply={applyReschedule} onUndo={undoReschedule} />}
+          {taskLayout === "archive" && <ArchiveView dashboard={dashboard} highlightKey={highlightKey} onRestore={restoreRecord} onDelete={deleteArchived} />}
           {taskLayout === "table" && <>
           <div className="task-filter-panel" aria-label="Фильтры задач">
             <label><span>Статус</span><select value={taskFilters.status} onChange={(event) => setTaskFilters({ ...taskFilters, status: event.target.value })}>
@@ -1697,14 +1782,14 @@ function App() {
                 {visibleTasks.map((task) => {
                   const linkedGoal = goals.find((goal) => goal.id === task.goalId);
                   return (
-                    <tr key={task.occurrenceDate ? `${task.id}:${task.occurrenceDate}` : task.id} className={task.status === "Выполнено" ? "task-done" : ""}>
+                    <tr key={task.occurrenceDate ? `${task.id}:${task.occurrenceDate}` : task.id} data-record-key={`task:${task.id}`} className={`${task.status === "Выполнено" ? "task-done" : ""}${highlightKey === `task:${task.id}` ? " record-highlight" : ""}`}>
                       <td className="check-col"><button type="button" className={`task-check${task.status === "Выполнено" ? " checked" : ""}`} aria-label={task.status === "Выполнено" ? `Снять отметку: ${task.title}` : `Отметить выполненной: ${task.title}`} onClick={() => toggleTask(task)}>{task.status === "Выполнено" && <Check size={13} />}</button></td>
                       <td><div className="task-name">{task.title}</div><span className="task-category">{task.category}</span>{task.recurrence && <span className="recurrence-badge" title="Правило повторения"><Repeat size={11} />{describeRecurrence(task.recurrence, task.seriesStart ?? task.date)}</span>}{task.notes && <p className="table-note">{task.notes}</p>}</td>
                       <td><span className="task-date"><CalendarDays size={14} />{task.date}</span>{task.time && <span className="task-time"><Clock3 size={13} />{task.time}</span>}{task.deadline && <span className="task-deadline">Срок {task.deadline.replace("T", " ")}</span>}</td>
                       <td><span className={`priority-pill priority-${task.priority}`}>{task.priority}</span></td>
                       <td><span className={`status-pill status-${task.status === "Выполнено" ? "done" : task.status === "В процессе" ? "doing" : "todo"}`}><Circle size={7} fill="currentColor" />{task.status}</span></td>
                       <td><span className="linked-goal">{linkedGoal ? <><Target size={13} />{linkedGoal.title}</> : <span className="unlinked">Без связи</span>}</span></td>
-                      <td className="row-actions">{workspaceOverview.workspaces.length > 0 && !task.recurrence && <button className="icon-button" type="button" onClick={() => setTaskShareDialog(task)} title="Скопировать или перенести в пространство" aria-label={`Скопировать или перенести задачу ${task.title} в пространство`}><Share2 size={15} /></button>}{task.recurrence && (!task.recurrence.until || task.recurrence.until > task.occurrenceDate) && <button className="icon-button" type="button" onClick={() => stopRecurrence(task)} title="Остановить повторение после этой даты" aria-label={`Остановить повторение задачи ${task.title}`}><Repeat size={15} /></button>}<button className="icon-button" type="button" onClick={() => setTaskDialog(task.recurrence ? tasks.find((item) => item.id === task.id) ?? task : task)} title="Редактировать задачу" aria-label={`Редактировать задачу ${task.title}`}><ChevronDown size={16} /></button><button className="icon-button danger-hover" type="button" onClick={() => deleteTask(task)} title="Удалить задачу" aria-label={`Удалить задачу ${task.title}`}><Trash2 size={15} /></button></td>
+                      <td className="row-actions">{workspaceOverview.workspaces.length > 0 && !task.recurrence && <button className="icon-button" type="button" onClick={() => setTaskShareDialog(task)} title="Скопировать или перенести в пространство" aria-label={`Скопировать или перенести задачу ${task.title} в пространство`}><Share2 size={15} /></button>}{task.recurrence && (!task.recurrence.until || task.recurrence.until > task.occurrenceDate) && <button className="icon-button" type="button" onClick={() => stopRecurrence(task)} title="Остановить повторение после этой даты" aria-label={`Остановить повторение задачи ${task.title}`}><Repeat size={15} /></button>}<button className="icon-button" type="button" onClick={() => setTaskDialog(task.recurrence ? tasks.find((item) => item.id === task.id) ?? task : task)} title="Редактировать задачу" aria-label={`Редактировать задачу ${task.title}`}><ChevronDown size={16} /></button><button className="icon-button" type="button" onClick={() => archiveRecord("task", task.id)} title={task.recurrence ? "В архив (вся серия)" : "В архив"} aria-label={`Архивировать задачу ${task.title}`}><Archive size={15} /></button><button className="icon-button danger-hover" type="button" onClick={() => deleteTask(task)} title="Удалить задачу" aria-label={`Удалить задачу ${task.title}`}><Trash2 size={15} /></button></td>
                     </tr>
                   );
                 })}
@@ -1716,11 +1801,12 @@ function App() {
                    </>}
                  </section>
 
-        <footer className="app-footer"><span><Sparkles size={14} /> Данные синхронизируются между вашими устройствами</span><button type="button" onClick={() => { if (!window.confirm("Удалить все цели и задачи? Это действие нельзя отменить.")) return; updateDashboard(EMPTY_DASHBOARD); }}>Очистить все данные</button></footer>
+        <footer className="app-footer"><span><Sparkles size={14} /> Данные синхронизируются между вашими устройствами</span><span className="footer-actions"><button type="button" onClick={() => setBackupOpen(true)}>Экспорт и резервная копия</button><button type="button" onClick={() => { if (!window.confirm("Удалить все цели и задачи? Это действие нельзя отменить.")) return; updateDashboard(EMPTY_DASHBOARD); }}>Очистить все данные</button></span></footer>
         </>
         )}
       </div>
 
+      {backupOpen && <BackupDialog Modal={Modal} dashboard={dashboard} theme={theme} onThemeChange={setTheme} onApply={(next) => updateDashboard(() => next)} onClose={() => setBackupOpen(false)} />}
       {settingsOpen && <SettingsDialog username={username} onClose={() => setSettingsOpen(false)} onSaved={setUsername} />}
       {goalDialog !== undefined && <GoalDialog key={goalDialog?.id ?? "new-goal"} goal={goalDialog} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} onClose={() => setGoalDialog(undefined)} onSave={saveGoal} />}
       {taskDialog !== undefined && <TaskDialog key={taskDialog?.id ?? "new-task"} task={taskDialog} defaults={taskDefaults} goals={goals} selectedDate={selectedDate} workspaceOptions={workspaceOverview.workspaces} overviewLoading={workspaceOverviewLoading} userId={user.id} onClose={() => { setTaskDialog(undefined); setTaskDefaults(null); }} onSave={saveTask} />}
