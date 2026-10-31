@@ -77,6 +77,7 @@ const STATUS_NAMES = {
   accepted: "Принято",
   declined: "Отклонено",
   cancelled: "Отменено",
+  expired: "Срок истёк",
 };
 
 function RecordHistory({ workspaceId, recordId, recordType, members, archived, canManage, onArchive }) {

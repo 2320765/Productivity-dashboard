@@ -20,6 +20,7 @@ import {
   Search,
   Settings,
   Share2,
+  ShieldCheck,
   Sparkles,
   Sun,
   Target,
@@ -44,11 +45,13 @@ import {
   THEME_KEY,
 } from "./dashboard.js";
 import {
+  checkIsAdmin,
   loadWorkspaceOverview,
   loadMyUsername,
   saveUsername,
   loadWorkspaceRecords,
   loadRemoteDashboard,
+  reportClientError,
   saveWorkspaceGoal,
   saveWorkspaceTask,
   supabase,
@@ -57,6 +60,7 @@ import {
 } from "./supabase.js";
 import Workspaces from "./Workspaces.jsx";
 import Friends from "./Friends.jsx";
+import AdminPanel from "./Admin.jsx";
 import TaskCalendar from "./Calendar.jsx";
 import OverdueTasks from "./Overdue.jsx";
 import ArchiveView, { GlobalSearch } from "./ArchiveView.jsx";
@@ -799,8 +803,20 @@ function ProgressBar({ percent, compact = false }) {
   );
 }
 
+function isAdminPath() {
+  return window.location.pathname.replace(/\/+$/, "").endsWith("/admin");
+}
+
+function appBasePath() {
+  return window.location.pathname.replace(/\/+$/, "").replace(/\/admin$/, "") || "/";
+}
+
 function App() {
   const [dashboard, setDashboard] = useState(EMPTY_DASHBOARD);
+  const [isAdmin, setIsAdmin] = useState(null);
+  const [adminAccessError, setAdminAccessError] = useState(false);
+  const [adminEntryError, setAdminEntryError] = useState("");
+  const [adminCheckVersion, setAdminCheckVersion] = useState(0);
   const [theme, setTheme] = useState(loadTheme);
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(!supabase);
@@ -826,13 +842,49 @@ function App() {
   const [highlightKey, setHighlightKey] = useState("");
   const [backupOpen, setBackupOpen] = useState(false);
   const [taskShareDialog, setTaskShareDialog] = useState(null);
-  const [activeSection, setActiveSection] = useState("dashboard");
+  const [activeSection, setActiveSection] = useState(() => isAdminPath() ? "admin" : "dashboard");
   const [workspaceOverview, setWorkspaceOverview] = useState({ workspaces: [], invitations: [] });
   const [workspaceOverviewError, setWorkspaceOverviewError] = useState("");
   const [workspaceOverviewLoading, setWorkspaceOverviewLoading] = useState(false);
   const [username, setUsername] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const userId = user?.id;
+  async function openAdmin() {
+    setAdminEntryError("");
+    if (import.meta.env.DEV) { setActiveSection("admin"); return; }
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error();
+      const response = await fetch("/api/admin", { method: "POST", headers: { Authorization: 'Bearer ' + session.access_token } });
+      if (!response.ok) throw new Error();
+      window.location.assign("/admin");
+    } catch { setAdminEntryError("Не удалось открыть административный раздел. Проверьте соединение и войдите заново."); }
+  }
+  // Права проверяются на сервере (RPC); скрытие вкладки и редирект лишь отражают ответ базы.
+  useEffect(() => {
+    setIsAdmin(null);
+    setAdminAccessError(false);
+    if (!userId || !supabase) return undefined;
+    let active = true;
+    checkIsAdmin()
+      .then((value) => { if (active) setIsAdmin(value); })
+      .catch(() => { if (active) { setIsAdmin(false); setAdminAccessError(true); } });
+    return () => { active = false; };
+  }, [userId, adminCheckVersion]);
+  useEffect(() => {
+    if (!authReady || !userId || isAdmin === null) return;
+    const onAdminPath = isAdminPath();
+    if (isAdmin && activeSection === "admin" && !onAdminPath) {
+      window.history.pushState(null, "", `${appBasePath().replace(/\/$/, "")}/admin`);
+    } else if (activeSection !== "admin" && onAdminPath) {
+      window.history.replaceState(null, "", appBasePath());
+    }
+  }, [authReady, userId, isAdmin, activeSection]);
+  useEffect(() => {
+    const onPopState = () => setActiveSection((current) => isAdminPath() ? "admin" : current === "admin" ? "dashboard" : current);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   useEffect(() => {
     if (!userId || !supabase) return undefined;
     let active = true;
@@ -1012,6 +1064,7 @@ function App() {
         skipSyncOnce.current = !local.pending;
         setDashboard(local.dashboard);
         setSyncState("offline");
+        reportClientError("load", error);
         setSyncError(`Сервер пока недоступен. Изменения останутся на устройстве: ${getErrorMessage(error)}`);
         setInitializedUserId(userId);
       }
@@ -1058,11 +1111,13 @@ function App() {
           setSyncError("");
         } catch (error) {
           setSyncState("error");
+          reportClientError("sync", error);
           setSyncError(`Не удалось получить обновление с другого устройства: ${getErrorMessage(error)}`);
         }
       })
       .subscribe((status, error) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          reportClientError("realtime", { code: status });
           setSyncError(`Подписка на синхронизацию недоступна: ${error ? getErrorMessage(error) : status}`);
         }
       });
@@ -1220,6 +1275,7 @@ function App() {
           }
         } else {
           setSyncState(navigator.onLine ? "error" : "offline");
+          reportClientError("sync", error);
           setSyncError(`Изменения сохранены локально, но не отправлены на сервер: ${getErrorMessage(error)}`);
         }
       } finally {
@@ -1265,6 +1321,7 @@ function App() {
   }
 
   async function signOut() {
+    if (!import.meta.env.DEV) await fetch("/api/admin", { method: "DELETE" }).catch(() => {});
     if (!supabase) return;
     setAuthLoading(true);
     setAuthError("");
@@ -1327,6 +1384,7 @@ function App() {
       localStorage.removeItem(`${STORAGE_KEY}:${user.id}:pending`);
     } catch (error) {
       setSyncState("error");
+      reportClientError("load", error);
       setSyncError(`Не удалось загрузить серверную версию: ${getErrorMessage(error)}`);
     }
   }
@@ -1580,7 +1638,8 @@ function App() {
           <button type="button" className={activeSection === "dashboard" ? "section-tab active" : "section-tab"} aria-current={activeSection === "dashboard" ? "page" : undefined} onClick={() => setActiveSection("dashboard")}>Личные планы</button>
           <button type="button" className={activeSection === "spaces" ? "section-tab active" : "section-tab"} aria-current={activeSection === "spaces" ? "page" : undefined} onClick={() => { setActiveSection("spaces"); refreshWorkspaceOverview(); }}><Users size={15} /> Пространства{workspaceOverview.invitations.some((invitation) => invitation.inviteeId === user.id && invitation.status === "pending") && <span className="section-tab-badge">!</span>}</button>
           <button type="button" className={activeSection === "friends" ? "section-tab active" : "section-tab"} aria-current={activeSection === "friends" ? "page" : undefined} onClick={() => setActiveSection("friends")}><Users size={15} /> Друзья</button>
-        </nav>
+                    {isAdmin === true && <button type="button" className={activeSection === "admin" ? "section-tab active" : "section-tab"} aria-current={activeSection === "admin" ? "page" : undefined} onClick={openAdmin}><ShieldCheck size={15} /> Админ</button>}
+                  </nav>
 
         {syncError && !remoteConflict && (
           <p className="sync-alert sync-alert-inline" role="alert">
@@ -1597,6 +1656,7 @@ function App() {
             </div>
           </section>
         )}
+        {adminEntryError && <p className="sync-alert" role="alert">{adminEntryError}</p>}
         {authError && <p className="sync-alert sync-alert-inline" role="alert">{authError}</p>}
         {activeSection !== "spaces" && workspaceOverviewError && <p className="sync-alert sync-alert-inline" role="alert">{workspaceOverviewError}</p>}
 
@@ -1608,6 +1668,8 @@ function App() {
             overviewLoading={workspaceOverviewLoading}
             onRefreshOverview={refreshWorkspaceOverview}
           />
+        ) : activeSection === "admin" ? (
+          isAdmin === true ? <AdminPanel /> : isAdmin === null ? <p className="workspace-hint" role="status">Проверяем доступ…</p> : <section className="admin-users" role="alert"><h2>{adminAccessError ? "Не удалось проверить доступ" : "Доступ запрещён"}</h2><p>{adminAccessError ? "Проверьте соединение и повторите проверку." : "Этот раздел доступен только закреплённому аккаунту администратора."}</p><button type="button" className="button button-secondary" onClick={() => setAdminCheckVersion(value => value + 1)}>Повторить проверку</button><button type="button" className="button button-primary" onClick={() => setActiveSection("dashboard")}>На главную</button></section>
         ) : activeSection === "friends" ? (
           <Friends userId={user.id} />
         ) : (

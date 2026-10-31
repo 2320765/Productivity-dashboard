@@ -503,3 +503,183 @@ export async function loadWorkspaceRecordHistory(workspaceId, recordType, record
     actorId: row.actor_id, actorName: row.actor_name, action: row.action,
     changes: row.changes, occurredAt: row.occurred_at }));
 }
+
+export async function checkIsAdmin() {
+  const { data, error } = await supabase.rpc("is_current_user_admin");
+  throwIfError(error);
+  return data === true;
+}
+
+export async function loadAdminOverview() {
+  const { data, error } = await supabase.rpc("admin_overview");
+  throwIfError(error);
+  return {
+    users: Number(data?.users ?? 0),
+    goals: Number(data?.goals ?? 0),
+    tasks: Number(data?.tasks ?? 0),
+    workspaces: Number(data?.workspaces ?? 0),
+    usersLast7Days: Number(data?.users_last_7_days ?? 0),
+    workspacesLast7Days: Number(data?.workspaces_last_7_days ?? 0),
+    events: Array.isArray(data?.events) ? data.events.map((event) => ({ kind: event.kind, at: event.at })) : [],
+  };
+}
+
+export async function adminListUsers(search, limit, offset) {
+  const { data, error } = await supabase.rpc("admin_list_users", { p_search: search, p_limit: limit, p_offset: offset });
+  throwIfError(error);
+  return {
+    total: Number(data?.total ?? 0),
+    users: (data?.users ?? []).map((row) => ({
+      id: row.id,
+      username: row.username ?? "",
+      displayName: row.display_name ?? "",
+      createdAt: row.created_at,
+      blocked: row.blocked === true,
+      isAdmin: row.is_admin === true,
+      goals: Number(row.goals ?? 0),
+      tasks: Number(row.tasks ?? 0),
+      workspaces: Number(row.workspaces ?? 0),
+    })),
+  };
+}
+
+export async function adminSetUserBlocked(userId, blocked, reason) {
+  const { error } = await supabase.rpc("admin_set_user_blocked", { p_user_id: userId, p_blocked: blocked, p_reason: reason || null });
+  throwIfError(error);
+}
+
+export async function adminAuditEvents(filters = {}, offset = 0) {
+  const { data, error } = await supabase.rpc("admin_audit_search", {
+    p_limit: 20, p_offset: offset,
+    p_from: filters.from || null, p_to: filters.to || null,
+    p_action: filters.action || null,
+    p_object_type: filters.objectType || null, p_object_id: filters.objectId?.trim() || null,
+  });
+  throwIfError(error);
+  return { total: Number(data?.total ?? 0), events: data?.events ?? [] };
+}
+
+export async function adminListWorkspaces(search, limit, offset) {
+  const { data, error } = await supabase.rpc("admin_list_workspaces", { p_search: search, p_limit: limit, p_offset: offset });
+  throwIfError(error);
+  return {
+    total: Number(data?.total ?? 0),
+    workspaces: (data?.workspaces ?? []).map((row) => ({
+      id: row.id,
+      name: row.name ?? "",
+      createdAt: row.created_at,
+      owner: row.owner ?? "",
+      ownerOk: row.owner_ok === true,
+      members: Number(row.members ?? 0),
+      goals: Number(row.goals ?? 0),
+      tasks: Number(row.tasks ?? 0),
+      pendingInvitations: Number(row.pending_invitations ?? 0),
+    })),
+  };
+}
+
+export async function adminWorkspaceDetails(workspaceId) {
+  const { data, error } = await supabase.rpc("admin_workspace_details", { p_workspace_id: workspaceId });
+  throwIfError(error);
+  return {
+    ownerId: data?.owner_id ?? "",
+    members: (data?.members ?? []).map((row) => ({
+      userId: row.user_id,
+      label: row.label ?? "",
+      role: row.role,
+      joinedAt: row.joined_at,
+      blocked: row.blocked === true,
+    })),
+    invitations: (data?.invitations ?? []).map((row) => ({
+      id: row.id,
+      invitee: row.invitee ?? "",
+      invitedBy: row.invited_by ?? "",
+      status: row.status,
+      createdAt: row.created_at,
+    })),
+  };
+}
+
+export async function adminCancelWorkspaceInvitation(invitationId, reason) {
+  const { error } = await supabase.rpc("admin_cancel_workspace_invitation", { p_invitation_id: invitationId, p_confirm: true, p_reason: reason || null });
+  throwIfError(error);
+}
+
+export async function adminRestoreWorkspaceOwner(workspaceId, userId, reason) {
+  const { error } = await supabase.rpc("admin_restore_workspace_owner", { p_workspace_id: workspaceId, p_user_id: userId, p_confirm: true, p_reason: reason || null });
+  throwIfError(error);
+}
+
+export async function adminListInvitations(status, limit = 25, offset = 0) {
+  const { data, error } = await supabase.rpc("admin_list_invitations", { p_status: status || null, p_limit: limit, p_offset: offset });
+  throwIfError(error);
+  return {
+    total: Number(data?.total ?? 0),
+    invitations: (data?.invitations ?? []).map((row) => ({
+      id: row.id,
+      status: row.status,
+      sender: row.sender ?? "",
+      recipient: row.recipient ?? "",
+      workspace: row.workspace ?? "",
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+    })),
+  };
+}
+
+export async function adminHealth(hours, category) {
+  const { data, error } = await supabase.rpc("admin_health", { p_hours: hours, p_category: category || null });
+  throwIfError(error);
+  return {
+    serverTime: data?.server_time ?? "",
+    lastSyncAt: data?.last_sync_at ?? null,
+    syncsLast24h: Number(data?.syncs_last_24h ?? 0),
+    errorTotal: Number(data?.error_total ?? 0),
+    byCategory: data?.by_category ?? {},
+    errors: (data?.errors ?? []).map((row) => ({ id: row.id, category: row.category, code: row.code, createdAt: row.created_at })),
+  };
+}
+
+export async function checkAuthHealth() {
+  if (!supabaseUrl || !supabaseKey) return false;
+  try {
+    const response = await fetch(`${supabaseUrl}/auth/v1/health`, { headers: { apikey: supabaseKey }, signal: AbortSignal.timeout(8000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+const reportedErrors = new Map();
+
+// Отправляет только категорию и короткий технический код, без текста ошибки.
+export function reportClientError(category, error) {
+  if (!supabase || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+  const raw = String(error?.code ?? error?.status ?? error?.name ?? "unknown");
+  const code = raw.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 24) || "unknown";
+  const key = `${category}:${code}`;
+  const now = Date.now();
+  if (now - (reportedErrors.get(key) ?? 0) < 60000) return;
+  reportedErrors.set(key, now);
+  supabase.rpc("report_client_error", { p_category: category, p_code: code }).then(() => {}, () => {});
+}
+
+export async function adminFindRecords(query, reason) {
+  const { data, error } = await supabase.rpc("admin_find_records", { p_query: query, p_reason: reason });
+  throwIfError(error);
+  return {
+    total: Number(data?.total ?? 0),
+    userFound: data?.user_found === true,
+    records: (data?.records ?? []).map((row) => ({
+      kind: row.kind,
+      scope: row.scope,
+      owner: row.owner ?? "",
+      workspace: row.workspace ?? "",
+      recordId: row.record_id,
+      title: row.title ?? "",
+      date: row.date ?? "",
+      status: row.status ?? "",
+      archived: row.archived === true,
+    })),
+  };
+}
